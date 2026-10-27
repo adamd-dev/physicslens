@@ -11,11 +11,11 @@ from physicslens.physics.fit import (
 
 FPS = 60
 NOISE_M = 0.001  # 1 mm tracking noise
-rng = np.random.default_rng(0)
 
 
-def noisy(values):
-    return values + rng.normal(0, NOISE_M, size=len(values))
+def noisy(values, seed=0):
+    # Fresh generator per call so results don't depend on test order or -k selection.
+    return values + np.random.default_rng(seed).normal(0, NOISE_M, size=len(values))
 
 
 def test_free_fall_recovers_g():
@@ -29,7 +29,7 @@ def test_free_fall_recovers_g():
 def test_projectile_recovers_vx_and_g():
     t = np.arange(0, 0.4, 1 / FPS)
     x = noisy(models.linear(t, 0.0, 1.2))
-    y = noisy(models.free_fall(t, 0.0, 0.0, models.G))
+    y = noisy(models.free_fall(t, 0.0, 0.0, models.G), seed=1)
     result = fit_projectile(t, x, y)
     assert result.params["vx"] == pytest.approx(1.2, rel=0.02)
     assert result.params["g"] == pytest.approx(models.G, rel=0.03)
@@ -47,7 +47,7 @@ def test_damped_pendulum_recovers_length():
 
 
 def test_dominant_frequency_with_uneven_timing():
-    t = np.cumsum(rng.uniform(0.9, 1.1, 600) / FPS)
+    t = np.cumsum(np.random.default_rng(2).uniform(0.9, 1.1, 600) / FPS)
     s = np.sin(2 * np.pi * 2.5 * t)
     assert dominant_frequency(t, s) == pytest.approx(2.5, rel=0.01)
 

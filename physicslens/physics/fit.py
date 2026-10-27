@@ -21,7 +21,8 @@ class FitResult:
 def _r2(y, y_hat) -> float:
     ss_res = float(np.sum((y - y_hat) ** 2))
     ss_tot = float(np.sum((y - np.mean(y)) ** 2))
-    return 1.0 - ss_res / ss_tot if ss_tot > 0 else 0.0
+    # Constant data has no variance to explain; nan, not 0, so callers can't mistake it for a bad fit.
+    return 1.0 - ss_res / ss_tot if ss_tot > 0 else float("nan")
 
 
 def _fit(func, names, t, y, p0, bounds=(-np.inf, np.inf)):
@@ -37,6 +38,8 @@ def _fit(func, names, t, y, p0, bounds=(-np.inf, np.inf)):
 
 def fit_free_fall(t, y) -> FitResult:
     t, y = np.asarray(t, float), np.asarray(y, float)
+    if len(t) < 4:
+        raise ValueError(f"free fall fit needs at least 4 points, got {len(t)}")
     a, b, c = np.polyfit(t, y, 2)
     params, stderr, res = _fit(models.free_fall, ["y0", "v0", "g"], t, y, p0=[c, b, 2 * a])
     return FitResult("free_fall", params, stderr, _r2(y, y - res), float(np.sqrt(np.mean(res**2))), res)
@@ -53,7 +56,8 @@ def fit_projectile(t, x, y) -> FitResult:
         "projectile",
         {**px, "y0": vertical.params["y0"], "vy": vertical.params["v0"], "g": vertical.params["g"]},
         {**sx, "y0": vertical.stderr["y0"], "vy": vertical.stderr["v0"], "g": vertical.stderr["g"]},
-        min(_r2(x, x - rx), vertical.r2),
+        # Pooled over both axes: with small vx, R² of x alone is pure noise and would sink a good fit.
+        1.0 - float(np.sum(residuals**2)) / float(np.sum((x - x.mean()) ** 2) + np.sum((y - y.mean()) ** 2)),
         float(np.sqrt(np.mean(residuals**2))),
         residuals,
     )
@@ -91,7 +95,7 @@ def fit_damped_oscillation(t, s) -> FitResult:
             params, stderr, res = _fit(
                 models.damped_oscillation, names, t, s, p0=[amplitude, 0.0, omega, phase, offset], bounds=bounds
             )
-        except RuntimeError:
+        except (RuntimeError, ValueError):
             continue
         sse = float(np.sum(res**2))
         if best is None or sse < best[0]:

@@ -2,47 +2,90 @@
 
 Phone videos often have variable frame timing, so timestamps come from the
 container when they look sane and fall back to index / fps otherwise.
+
+Slow-motion files (e.g. Samsung 240 fps) are written to play back at 30 fps, so
+their container clock runs slow. Pass `capture_fps` to rescale to real time.
 """
 
+import math
+import warnings
 from dataclasses import dataclass
 
 import cv2
 import numpy as np
 
+# Container clock may disagree with the declared fps by this much before we distrust it.
+MAX_CLOCK_MISMATCH = 0.2
+
 
 @dataclass
 class Video:
     frames: list[np.ndarray]
-    timestamps: np.ndarray
-    fps: float
+    timestamps: np.ndarray  # real seconds, zero at the first kept frame
+    fps: float  # real capture rate
     width: int
     height: int
+    timestamp_source: str  # "container" or "index"
+    time_scale: float  # real seconds per playback second
 
 
-def load_video(path: str, start_s: float = 0.0, end_s: float | None = None) -> Video:
+def _repair(ts: np.ndarray) -> np.ndarray | None:
+    """Fix isolated duplicate / backwards stamps by interpolation; None if hopeless."""
+    idx = np.arange(len(ts))
+    good = np.r_[True, np.diff(ts) > 0]
+    good &= ts >= np.maximum.accumulate(ts)
+    if good.sum() < max(2, len(ts) // 2):
+        return None
+    fixed = np.interp(idx, idx[good], ts[good])
+    return fixed if np.all(np.diff(fixed) > 0) else None
+
+
+def load_video(
+    path: str, start_s: float = 0.0, end_s: float | None = None, capture_fps: float | None = None
+) -> Video:
+    """Load frames in the half-open real-time window [start_s, end_s)."""
     cap = cv2.VideoCapture(path)
     if not cap.isOpened():
         raise FileNotFoundError(f"cannot open video: {path}")
-    fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
-    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    playback_fps = cap.get(cv2.CAP_PROP_FPS)
+    if not math.isfinite(playback_fps) or playback_fps <= 0:
+        playback_fps = 30.0
+    time_scale = playback_fps / capture_fps if capture_fps else 1.0
 
-    frames, container_ts = [], []
+    frames, container_ts, index_ts = [], [], []
+    i = 0
     while True:
         ok, frame = cap.read()
         if not ok:
             break
+        t_container = cap.get(cv2.CAP_PROP_POS_MSEC) / 1000.0 * time_scale
+        t_index = i / playback_fps * time_scale
+        i += 1
+        # Window on index time: container stamps are not trusted until checked below.
+        if t_index < start_s:
+            continue
+        if end_s is not None and t_index >= end_s:
+            break
         frames.append(frame)
-        container_ts.append(cap.get(cv2.CAP_PROP_POS_MSEC) / 1000.0)
+        container_ts.append(t_container)
+        index_ts.append(t_index)
     cap.release()
+    if not frames:
+        raise ValueError(f"no frames in window [{start_s}, {end_s}) of {path}")
 
-    index_ts = np.arange(len(frames)) / fps
-    container_ts = np.asarray(container_ts)
-    monotonic = len(container_ts) > 1 and np.all(np.diff(container_ts) > 0)
-    timestamps = container_ts - container_ts[0] if monotonic else index_ts
+    expected_dt = time_scale / playback_fps
+    timestamps, source = np.asarray(index_ts), "index"
+    if len(frames) > 1:
+        repaired = _repair(np.asarray(container_ts))
+        if repaired is not None:
+            median_dt = float(np.median(np.diff(repaired)))
+            if abs(median_dt - expected_dt) / expected_dt <= MAX_CLOCK_MISMATCH:
+                timestamps, source = repaired, "container"
+                dt = np.diff(repaired)
+                if capture_fps and np.std(dt) / median_dt > 0.2:
+                    warnings.warn("frame spacing is uneven: slow-motion clip may contain a speed ramp")
+        if source == "index":
+            warnings.warn("container timestamps unusable; falling back to index / fps")
 
-    keep = timestamps >= start_s
-    if end_s is not None:
-        keep &= timestamps <= end_s
-    kept_frames = [f for f, k in zip(frames, keep) if k]
-    return Video(kept_frames, timestamps[keep], fps, width, height)
+    height, width = frames[0].shape[:2]  # decoded shape, which already reflects rotation
+    return Video(frames, timestamps - timestamps[0], 1.0 / expected_dt, width, height, source, time_scale)
