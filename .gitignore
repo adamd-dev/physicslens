@@ -10,3 +10,5 @@ samples/*.MOV
 graphify-out/
 samples/tracker/
 *.egg-info/
+.env.*
+!.env.example
