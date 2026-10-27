@@ -44,14 +44,26 @@ class AgentResult:
 
 
 def _arguments(call: dict) -> dict:
+    """Model-controlled: must decode to a JSON object or the call is refused."""
     args = call.get("arguments") or {}
-    return json.loads(args) if isinstance(args, str) else args
+    if isinstance(args, str):
+        args = json.loads(args)
+    if not isinstance(args, dict):
+        raise ValueError(f"arguments must be a JSON object, got {type(args).__name__}")
+    return args
+
+
+def _dump(result: dict) -> str:
+    try:
+        return json.dumps(result, allow_nan=False)
+    except ValueError:
+        return json.dumps({"error": "tool result contained non-finite numbers"})
 
 
 def _finish(box: Toolbox, args: dict) -> tuple[dict, bool]:
     """Validate a final_answer call; returns (tool reply, accepted)."""
     fit_id = args.get("fit_id")
-    if fit_id not in box.fits:
+    if not isinstance(fit_id, str) or fit_id not in box.fits:
         return {"error": f"unknown fit_id {fit_id!r}; known: {sorted(box.fits)}"}, False
     check = box.check_plausibility(fit_id)
     if not check["ok"] and not args.get("accept_flagged"):
@@ -78,14 +90,16 @@ def run_agent(client: LLMClient, box: Toolbox, question: str | None = None, max_
             try:
                 args = _arguments(call)
             except json.JSONDecodeError as exc:
-                result, done = {"error": f"arguments are not valid JSON: {exc}"}, False
+                result = {"error": f"arguments are not valid JSON: {exc}"}
+            except ValueError as exc:
+                result = {"error": str(exc)}
             else:
-                if call["name"] == "final_answer":
+                if call.get("name") == "final_answer":
                     result, done = _finish(box, args)
                     if done:
-                        messages.append(Message("tool", json.dumps(result), tool_call_id=call["id"]))
-                        return AgentResult(args["fit_id"], args.get("summary", ""), result, step, messages)
+                        messages.append(Message("tool", _dump(result), tool_call_id=call.get("id")))
+                        return AgentResult(args["fit_id"], str(args.get("summary", "")), result, step, messages)
                 else:
-                    result = box.call(call["name"], args)
-            messages.append(Message("tool", json.dumps(result, allow_nan=False), tool_call_id=call["id"]))
+                    result = box.call(call.get("name"), args)
+            messages.append(Message("tool", _dump(result), tool_call_id=call.get("id")))
     return AgentResult(None, f"stopped after {max_steps} steps without an accepted answer", None, max_steps, messages)

@@ -15,9 +15,11 @@ import warnings
 
 import numpy as np
 
+from physicslens.agent.loop import run_agent
 from physicslens.agent.tools import Toolbox, TrackData
 from physicslens.calibrate import Calibration
 from physicslens.ingest import load_video
+from physicslens.llm.meta_client import LLMError, MetaClient
 from physicslens.physics import models
 from physicslens.track.color import track_color
 from physicslens.track.motion import field_order, track_motion
@@ -54,7 +56,47 @@ def parse_args(argv=None):
     p.add_argument("--height", type=float, help="drop height in m for a landing prediction (projectile)")
     p.add_argument("--plot", help="save trajectory and residual plot to this PNG")
     p.add_argument("--json", action="store_true", help="print the full result as JSON")
-    return p.parse_args(argv)
+    p.add_argument("--agent", action="store_true", help="let the Muse agent choose, check and report (needs MODEL_API_KEY)")
+    args = p.parse_args(argv)
+    if args.agent and args.json:
+        p.error("--json is not supported with --agent yet")
+    if args.agent and args.model != "auto":
+        p.error("--model picks the model by hand; drop it or drop --agent")
+    return args
+
+
+def make_client():
+    """The runtime model; tests swap this for a scripted MockClient."""
+    return MetaClient.from_env()
+
+
+def report_agent(args, data: TrackData, box: Toolbox, video_warnings) -> int:
+    """Exit codes: 0 accepted and plausible, 1 accepted but flagged, 3 setup/API failure, 4 no answer."""
+    for w in video_warnings:
+        print(f"  warning: {w.message}", file=sys.stderr)
+    question = "Measure the physics in this tracked trajectory."
+    if args.height:
+        question += f" The launch edge is {args.height} m above the landing surface; if this is a projectile, predict where it lands."
+    try:
+        result = run_agent(make_client(), box, question)
+    except (LLMError, OSError, ValueError) as exc:
+        print(f"agent failed: {exc}", file=sys.stderr)
+        return 3
+    if result.fit_id is None:
+        print(f"agent gave no accepted answer after {result.steps} steps: {result.summary}", file=sys.stderr)
+        return 4
+    # Measured values first: they come from the tools, the summary comes from the model.
+    fit = box.fits[result.fit_id]
+    status = "ok" if result.check["ok"] else "; ".join(result.check["problems"])
+    print(f"agent chose {result.fit_id} ({fit.model}) in {result.steps} steps: r2={fit.r2:.5f} [{status}]")
+    for name, value in fit.params.items():
+        print(f"  {name} = {value:.4f} ± {fit.stderr[name]:.4f}")
+    print(f"\n  model summary (written by the model, not verified): {result.summary}")
+    if not result.check["ok"]:
+        print(f"WARNING: the model accepted a fit that failed checks: {status}", file=sys.stderr)
+    if args.plot:
+        plot(args.plot, data, box, {"fit_id": result.fit_id, "model": fit.model}, args.axis)
+    return 0 if result.check["ok"] else 1
 
 
 def track(args, video):
@@ -135,6 +177,8 @@ def main(argv=None) -> int:
     # Shift time to the first tracked sample so the toolbox window covers the whole track.
     data = TrackData(tr.t - tr.t[0], calibration.to_meters(tr.x), calibration.to_meters(tr.y))
     box = Toolbox(data)
+    if args.agent:
+        return report_agent(args, data, box, caught)
     results = run_fits(box, args)
     best = choose(results)
 

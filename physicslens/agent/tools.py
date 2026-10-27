@@ -88,6 +88,8 @@ class Toolbox:
 
     def describe_track(self) -> dict:
         t, x, y = self.data.t, self.data.x, self.data.y
+        if len(t) < 3:
+            raise ValueError(f"track has only {len(t)} points; nothing to describe")
         dt = np.diff(t)
         x_span, y_span = float(np.ptp(x)), float(np.ptp(y))
         return {
@@ -162,12 +164,14 @@ class Toolbox:
 
     def call(self, name: str, arguments: dict) -> dict:
         """Run a tool by name; errors come back as data so the agent can recover."""
-        if name not in TOOL_NAMES:
+        if not isinstance(name, str) or name not in TOOL_NAMES:
             return {"error": f"unknown tool {name!r}"}
         try:
             return getattr(self, name)(**arguments)
         except (ValueError, TypeError, RuntimeError) as exc:
             return {"error": str(exc)}
+        except Exception as exc:  # numpy/scipy edge cases (overflow, LinAlgError) must not end the run
+            return {"error": f"{type(exc).__name__}: {exc}"}
 
 
 _WINDOW = {
