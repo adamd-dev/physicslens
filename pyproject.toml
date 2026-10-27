@@ -1,0 +1,20 @@
+[project]
+name = "physicslens"
+version = "0.1.0"
+description = "Measure real physics experiments from a phone video with Meta's models."
+requires-python = ">=3.11"
+dependencies = [
+    "numpy>=1.26",
+    "scipy>=1.11",
+    # 4.10.0.84 is the last release with a macOS 12 x86_64 wheel; newer ones build from source (1h+).
+    "opencv-python-headless>=4.9,<4.11",
+    "matplotlib>=3.8",
+]
+
+[project.optional-dependencies]
+ui = ["streamlit>=1.38", "plotly>=5.22"]
+dev = ["pytest>=8"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
