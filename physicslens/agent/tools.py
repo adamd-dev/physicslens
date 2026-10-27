@@ -56,13 +56,18 @@ def runs_z(residuals: np.ndarray) -> float:
     return float((runs - mean) / np.sqrt(var)) if var > 0 else 0.0
 
 
+def _num(v: float, digits: int = 5) -> float | None:
+    """Round for the model; inf/nan become null because they are not valid JSON."""
+    return round(float(v), digits) if np.isfinite(v) else None
+
+
 def _summary(fit_id: str, result: fit.FitResult, t_offset: float, n: int) -> dict:
     return {
         "fit_id": fit_id,
         "model": result.model,
-        "params": {k: round(v, 5) for k, v in result.params.items()},
-        "stderr": {k: round(v, 5) for k, v in result.stderr.items()},
-        "r2": round(result.r2, 5),
+        "params": {k: _num(v) for k, v in result.params.items()},
+        "stderr": {k: _num(v) for k, v in result.stderr.items()},
+        "r2": _num(result.r2),
         "rmse_m": round(result.rmse, 5),
         "window_start_s": round(t_offset, 4),
         "n_points": n,
@@ -134,7 +139,7 @@ class Toolbox:
             length = models.pendulum_length(result.params["omega"], result.params["gamma"])
             if not PENDULUM_LENGTH_RANGE[0] <= length <= PENDULUM_LENGTH_RANGE[1]:
                 problems.append(f"pendulum length {length:.3f} m outside plausible {PENDULUM_LENGTH_RANGE}")
-        return {"fit_id": fit_id, "ok": not problems, "problems": problems, "runs_z": round(z, 2)}
+        return {"fit_id": fit_id, "ok": not problems, "problems": problems, "runs_z": _num(z, 2)}
 
     def predict_landing(self, fit_id: str, height_m: float, use_measured_g: bool = True) -> dict:
         result = self.fits.get(fit_id)
@@ -150,7 +155,7 @@ class Toolbox:
         return {
             "fit_id": fit_id,
             "landing_distance_m": round(float(distance), 4),
-            "uncertainty_m": round(float(sigma), 4),
+            "uncertainty_m": _num(sigma, 4),
             "flight_time_s": round(float(models.landing_time(height_m, p["vy"], g)), 4),
             "g_used": round(float(g), 4),
         }

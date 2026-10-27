@@ -11,13 +11,16 @@ from typing import Protocol
 
 @dataclass
 class Message:
-    role: str
+    role: str  # "system" | "user" | "assistant" | "tool"
     content: str
+    tool_calls: list[dict] = field(default_factory=list)  # assistant turns that called tools
+    tool_call_id: str | None = None  # tool turns: which call this answers
 
 
 @dataclass
 class Reply:
     content: str
+    # Each call: {"id": str, "name": str, "arguments": dict or JSON string}
     tool_calls: list[dict] = field(default_factory=list)
 
 
