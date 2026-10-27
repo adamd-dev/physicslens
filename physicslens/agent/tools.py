@@ -14,6 +14,8 @@ from ..physics import fit, models
 MIN_R2 = 0.98
 G_RANGE = (9.0, 10.6)
 MAX_RUNS_Z = 3.0
+MIN_CYCLES = 1.5  # an oscillation fit on less than this extrapolates the period
+PENDULUM_LENGTH_RANGE = (0.05, 5.0)
 
 
 @dataclass
@@ -71,11 +73,13 @@ def _summary(fit_id: str, result: fit.FitResult, t_offset: float, n: int) -> dic
 class Toolbox:
     data: TrackData
     fits: dict[str, fit.FitResult] = field(default_factory=dict)
+    durations: dict[str, float] = field(default_factory=dict)
 
-    def _store(self, result: fit.FitResult, t_offset: float, n: int) -> dict:
+    def _store(self, result: fit.FitResult, t: np.ndarray, t_offset: float) -> dict:
         fit_id = f"fit_{len(self.fits) + 1}"
         self.fits[fit_id] = result
-        return _summary(fit_id, result, t_offset, n)
+        self.durations[fit_id] = float(t[-1] - t[0])
+        return _summary(fit_id, result, t_offset, len(t))
 
     def describe_track(self) -> dict:
         t, x, y = self.data.t, self.data.x, self.data.y
@@ -94,17 +98,18 @@ class Toolbox:
 
     def fit_free_fall(self, t_start: float | None = None, t_end: float | None = None) -> dict:
         t, _, y, t0 = _window(self.data, t_start, t_end)
-        return self._store(fit.fit_free_fall(t, y), t0, len(t))
+        return self._store(fit.fit_free_fall(t, y), t, t0)
 
     def fit_projectile(self, t_start: float | None = None, t_end: float | None = None) -> dict:
         t, x, y, t0 = _window(self.data, t_start, t_end)
-        return self._store(fit.fit_projectile(t, x, y), t0, len(t))
+        return self._store(fit.fit_projectile(t, x, y), t, t0)
 
     def fit_pendulum(self, axis: str = "x", t_start: float | None = None, t_end: float | None = None) -> dict:
         t, x, y, t0 = _window(self.data, t_start, t_end)
         result = fit.fit_damped_oscillation(t, x if axis == "x" else y)
-        summary = self._store(result, t0, len(t))
+        summary = self._store(result, t, t0)
         summary["length_m"] = round(models.pendulum_length(result.params["omega"], result.params["gamma"]), 4)
+        summary["cycles_observed"] = round(result.params["omega"] * self.durations[summary["fit_id"]] / (2 * np.pi), 2)
         return summary
 
     def check_plausibility(self, fit_id: str) -> dict:
@@ -122,6 +127,13 @@ class Toolbox:
         g = result.params.get("g")
         if g is not None and not G_RANGE[0] <= g <= G_RANGE[1]:
             problems.append(f"g={g:.3f} outside plausible {G_RANGE}; check calibration or time scale")
+        if result.model == "damped_oscillation":
+            cycles = result.params["omega"] * self.durations[fit_id] / (2 * np.pi)
+            if cycles < MIN_CYCLES:
+                problems.append(f"only {cycles:.2f} cycles observed; period is extrapolated, not measured")
+            length = models.pendulum_length(result.params["omega"], result.params["gamma"])
+            if not PENDULUM_LENGTH_RANGE[0] <= length <= PENDULUM_LENGTH_RANGE[1]:
+                problems.append(f"pendulum length {length:.3f} m outside plausible {PENDULUM_LENGTH_RANGE}")
         return {"fit_id": fit_id, "ok": not problems, "problems": problems, "runs_z": round(z, 2)}
 
     def predict_landing(self, fit_id: str, height_m: float, use_measured_g: bool = True) -> dict:
