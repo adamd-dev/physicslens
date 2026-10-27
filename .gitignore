@@ -9,3 +9,4 @@ samples/*.mov
 samples/*.MOV
 graphify-out/
 samples/tracker/
+*.egg-info/
