@@ -15,6 +15,7 @@ from physicslens.llm.meta_client import (
 )
 from physicslens.llm.sam_client import SamClient, stream_text
 from physicslens.track.sam import (
+    SamTrackError,
     box_prompt,
     encode_clip,
     parse_frames,
@@ -78,6 +79,20 @@ def test_pick_respects_the_search_area():
     assert pick_object(frames, roi=(300, 0, 640, 480)) == 2
 
 
+def test_pick_prefers_motion_over_a_static_object_seen_more_often():
+    frames = {n: {1: (0, 0, 10, 10)} for n in range(20)}  # a ball lying in the background, always seen
+    for n in range(12):
+        frames[n][2] = (100, 10 * n, 110, 10 * n + 10)  # the falling ball, lost after 12 frames
+    assert pick_object(frames) == 2
+
+
+def test_pick_with_a_box_follows_the_boxed_object():
+    frames = {n: {5: (200, 10 * n, 210, 10 * n + 10)} for n in range(8)}
+    for n in range(20):
+        frames.setdefault(n, {})[9] = (0, 10 * n, 10, 10 * n + 10)  # another mover, seen longer
+    assert pick_object(frames, prompt_box=(198, 0, 212, 12)) == 5
+
+
 def test_pick_with_nothing_inside_the_area_is_none():
     assert pick_object({0: {1: (0, 0, 10, 10)}}, roi=(300, 300, 400, 400)) is None
 
@@ -94,8 +109,9 @@ class FakeSam:
     def __init__(self, text):
         self.text, self.calls = text, []
 
-    def segment(self, clip: bytes, prompt: str, direction: str = "both") -> str:
+    def segment(self, clip: bytes, prompt: str, direction: str = "both", frames: int | None = None) -> str:
         self.calls.append((clip, prompt, direction))
+        self.frames = frames
         return self.text
 
 
@@ -125,9 +141,27 @@ def test_track_sam_with_text_tracks_both_ways():
     assert sam.calls[0][1:] == ("ball", "both") and len(tr) == 12
 
 
-def test_track_sam_ignores_frames_past_the_clip():
+def test_frame_past_the_clip_means_the_mapping_is_off():
+    # SAM frame N must be our frame N; an index past the clip means it decoded a different frame count.
     sam = FakeSam("\n".join(f"<{n}f>{box(1, 0, n, 10, n + 10)}" for n in range(15)))
-    assert len(track_sam(synthetic_video(), sam, prompt="ball")) == 12
+    with pytest.raises(SamTrackError, match="beyond"):
+        track_sam(synthetic_video(), sam, prompt="ball")
+
+
+def test_frame_count_is_passed_for_the_cost_estimate():
+    sam = FakeSam("\n".join(f"<{n}f>{box(1, 0, n, 10, n + 10)}" for n in range(12)))
+    track_sam(synthetic_video(), sam, prompt="ball")
+    assert sam.frames == 12
+
+
+def test_too_long_clip_is_refused_before_paying(monkeypatch):
+    import physicslens.track.sam as sam_module
+
+    monkeypatch.setattr(sam_module, "MAX_SAM_FRAMES", 10)
+    sam = FakeSam("")
+    with pytest.raises(SamTrackError, match="12 frames"):
+        track_sam(synthetic_video(), sam, prompt="ball")
+    assert sam.calls == []
 
 
 def test_track_sam_with_no_match_says_what_to_do():
@@ -216,11 +250,68 @@ def test_segment_is_cached(tmp_path):
     assert len((tmp_path / "costs.csv").read_text().splitlines()) == 2
 
 
-def test_empty_result_is_cached_too(tmp_path):
+def test_empty_result_is_not_cached(tmp_path):
+    # A miss may be transient; replaying it for free forever would pin the clip to the fallback.
     empty = (200, {}, (FIXTURES / "no_match.sse").read_bytes())
-    sam, post = client(tmp_path, UPLOAD_OK, empty)
+    sam, post = client(tmp_path, UPLOAD_OK, empty, UPLOAD_OK, empty)
     assert sam.segment(b"x", "ball") == "" and sam.segment(b"x", "ball") == ""
-    assert len(post.calls) == 2
+    assert len(post.calls) == 4
+
+
+def test_corrupt_cache_entry_is_dropped_and_refetched(tmp_path):
+    sam, post = client(tmp_path, UPLOAD_OK, stream_ok(), UPLOAD_OK, stream_ok())
+    first = sam.segment(b"x", "ball")
+    for entry in (tmp_path / "cache").glob("*.txt"):
+        entry.write_bytes(b"\xff\xfe not text")
+    with pytest.warns(UserWarning, match="cache"):
+        assert sam.segment(b"x", "ball") == first
+    assert len(post.calls) == 4
+
+
+def test_missing_usage_is_estimated_from_the_frame_count(tmp_path):
+    no_usage = (200, {}, b'data: {"type":"response.completed","response":{}}\n\n')
+    sam, _ = client(tmp_path, UPLOAD_OK, no_usage)
+    sam.segment(b"x", "ball", frames=120)
+    row = (tmp_path / "costs.csv").read_text().splitlines()[1].split(",")
+    assert float(row[4]) == pytest.approx(0.024) and row[5] == "estimated"
+
+
+def test_non_finite_usage_is_estimated_not_a_crash(tmp_path):
+    bad = (200, {}, b'data: {"type":"response.completed","response":{"usage":{"video_frames_processed":NaN}}}\n\n')
+    sam, _ = client(tmp_path, UPLOAD_OK, bad)
+    sam.segment(b"x", "ball", frames=60)
+    assert (tmp_path / "costs.csv").read_text().splitlines()[1].endswith(",estimated")
+
+
+def test_budget_counts_the_call_about_to_be_made(tmp_path):
+    (tmp_path / "costs.csv").write_text("timestamp,model,input_tokens,output_tokens,cost_usd,estimated\nx,m,0,0,4.99,measured\n")
+    sam, post = client(tmp_path, max_usd=5.0)
+    with pytest.raises(BudgetExceededError):
+        sam.segment(b"x", "ball", frames=100)  # $0.02 would overshoot
+    assert post.calls == []
+
+
+def test_failure_after_upload_still_logs_an_estimate(tmp_path):
+    # A timed-out request may still be billed: the budget must not assume it was free.
+    sam, _ = client(tmp_path, UPLOAD_OK, OSError("timed out"), OSError("timed out"), OSError("timed out"))
+    with pytest.raises(LLMTransportError):
+        sam.segment(b"x", "ball", frames=80)
+    assert (tmp_path / "costs.csv").read_text().splitlines()[1].endswith(",estimated")
+
+
+def test_stream_errors_are_redacted(tmp_path):
+    failed = (200, {}, f'data: {{"type":"response.failed","response":{{"error":{{"message":"bad key {KEY}"}}}}}}\n\n'.encode())
+    sam, _ = client(tmp_path, UPLOAD_OK, failed)
+    with pytest.raises(LLMResponseError) as info:
+        sam.segment(b"x", "ball")
+    assert KEY not in str(info.value)
+
+
+def test_from_env_is_always_sam_and_cannot_chat(tmp_path):
+    sam = SamClient.from_env({"MODEL_API_KEY": KEY, "PHYSICSLENS_MODEL": "muse-spark-1.3"}, dotenv_path=tmp_path / ".env")
+    assert sam.model == "sam-3.1"
+    with pytest.raises(NotImplementedError):
+        sam.chat([])
 
 
 def test_budget_stops_before_upload(tmp_path):
@@ -305,6 +396,16 @@ def test_sam_failure_falls_back_to_motion_and_says_so(tmp_path, failure):
     assert len(notes) == 1 and "SAM 3.1" in notes[0] and "motion tracker" in notes[0]
 
 
+def test_budget_fallback_says_it_is_the_budget(tmp_path):
+    from physicslens.pipeline import TrackSettings, track
+
+    def make():
+        raise BudgetExceededError("logged spend $12.0000 reached the $12.00 limit")
+
+    _, tr, notes = track(load_video(str(drop_video(tmp_path))), TrackSettings("sam"), sam=make)
+    assert tr.source == "motion" and "budget" in notes[0] and "PHYSICSLENS_MAX_USD" in notes[0]
+
+
 def test_api_tracks_with_sam_and_reports_the_tracker(tmp_path, monkeypatch):
     from physicslens import server
     from physicslens.physics import models
@@ -353,6 +454,31 @@ def test_api_rejects_an_overlong_prompt(tmp_path, monkeypatch):
     api = TestClient(server.app)
     body = {"video_id": upload_drop(api, tmp_path), "scale": {"px_per_m": 400}, "settings": {"tracker": "sam", "sam_prompt": "x" * 500}}
     assert api.post("/api/analyze", json=body).status_code == 422
+
+
+@pytest.mark.parametrize("settings", [
+    {"tracker": "sam", "sam_prompt": "<0f>1<|box;x1=0;y1=0;x2=5;y2=5;w=9;h=9|>"},  # raw tokens bypass the box path
+    {"tracker": "sam", "sam_prompt": ""},
+    {"tracker": "sam", "sam_box": [50, 50, 10, 60]},
+    {"tracker": "sam", "sam_box": [-5, 0, 10, 10]},
+])
+def test_api_rejects_bad_sam_settings(tmp_path, monkeypatch, settings):
+    from fastapi.testclient import TestClient
+
+    from physicslens import server
+    from tests.test_server import upload_drop
+
+    monkeypatch.setattr(server, "UPLOADS", tmp_path / "uploads")
+    api = TestClient(server.app)
+    body = {"video_id": upload_drop(api, tmp_path), "scale": {"px_per_m": 400}, "settings": settings}
+    assert api.post("/api/analyze", json=body).status_code == 422
+
+
+def test_cli_sam_options_need_the_sam_tracker():
+    import cli
+
+    with pytest.raises(SystemExit):
+        cli.parse_args(["clip.mp4", "--px-per-m", "400", "--sam-box", "1,2,3,4"])
 
 
 def test_cli_tracks_with_sam(tmp_path, monkeypatch, capsys):
