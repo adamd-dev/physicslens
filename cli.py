@@ -91,6 +91,9 @@ def report_agent(args, data: TrackData, box: Toolbox, video_warnings) -> int:
                 fh.write(text)
         except (OSError, TypeError, ValueError) as exc:
             print(f"  warning: transcript not saved: {exc}", file=sys.stderr)
+    if result.no_measurement:
+        print(f"agent: no measurement possible: {result.summary}", file=sys.stderr)
+        return 4
     if result.fit_id is None:
         print(f"agent gave no accepted answer after {result.steps} steps: {result.summary}", file=sys.stderr)
         return 4

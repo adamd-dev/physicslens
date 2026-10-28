@@ -78,3 +78,34 @@ def test_step_limit_and_bad_json():
     result = run_agent(client, pendulum_box(), max_steps=4)
     assert result.fit_id is None
     assert "not valid JSON" in client.requests[1][-1].content
+
+
+def test_no_measurement_ends_the_run():
+    client = MockClient([
+        Reply("", [call(1, "fit_free_fall")]),
+        Reply("", [call(2, "final_answer", summary="only a pendulum swing was tracked, film a real drop instead")]),
+    ])
+    result = run_agent(client, pendulum_box())
+    assert result.no_measurement and result.fit_id is None and result.check is None
+    assert result.steps == 2
+    assert "film a real drop" in result.summary
+
+
+def test_cannot_give_up_while_a_fit_passes():
+    client = MockClient([
+        Reply("", [call(1, "fit_pendulum", axis="x")]),
+        Reply("", [call(2, "final_answer", summary="nothing here can be measured reliably, sorry")]),
+        Reply("", [call(3, "final_answer", fit_id="fit_1", summary="Pendulum length 0.50 m")]),
+    ])
+    result = run_agent(client, pendulum_box())
+    refused = json.loads(client.requests[2][-1].content)
+    assert "fit_1 passes every check" in refused["error"]
+    assert result.fit_id == "fit_1" and not result.no_measurement
+
+
+def test_giving_up_needs_a_reason():
+    client = MockClient([Reply("", [call(1, "final_answer", summary="no")])])
+    result = run_agent(client, pendulum_box(), max_steps=1)
+    refused = json.loads(result.transcript[-1].content)
+    assert "why no measurement is possible" in refused["error"]
+    assert not result.no_measurement

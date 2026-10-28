@@ -89,6 +89,15 @@ def test_agent_without_answer_ends_with_error(client, tmp_path, monkeypatch):
     assert stream[-1][0] == "done"
 
 
+def test_agent_can_report_no_measurement(client, tmp_path, monkeypatch):
+    reason = "only 3 points tracked; draw a search area around the ball"
+    monkeypatch.setattr(server, "make_client", lambda: MockClient([Reply("", [call(1, "final_answer", summary=reason)])]))
+    stream = analyze(client, upload_drop(client, tmp_path), agent=True)
+    error = dict(stream)["error"]
+    assert error["stage"] == "no measurement" and error["message"] == reason
+    assert "result" not in dict(stream) and stream[-1][0] == "done"
+
+
 def test_tracking_failure_is_an_error_event(client, tmp_path):
     stream = analyze(client, upload_drop(client, tmp_path), settings={"tracker": "color", "hsv_lower": [0, 200, 0], "hsv_upper": [10, 255, 50]})
     assert dict(stream)["error"]["stage"] == "tracking"

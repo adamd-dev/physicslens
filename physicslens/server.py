@@ -262,7 +262,8 @@ def _analyze(req: AnalyzeRequest, emit) -> None:
         finally:
             emit("cost", {"run_usd": _spent() - before, "total_usd": _spent()})
         if outcome.fit_id is None:
-            emit("error", {"stage": "agent", "message": outcome.summary, "steps": outcome.steps})
+            stage = "no measurement" if outcome.no_measurement else "agent"
+            emit("error", {"stage": stage, "message": outcome.summary, "steps": outcome.steps})
             return
         fit_id, check = outcome.fit_id, outcome.check
         extra = {"summary": outcome.summary, "steps": outcome.steps, "source": "agent"}

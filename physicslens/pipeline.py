@@ -79,7 +79,9 @@ def choose(results: list[dict]) -> dict | None:
     for name in ("free_fall", "projectile", "pendulum"):
         if name in plausible:
             return plausible[name]
-    return min(fitted.values(), key=lambda r: r["rmse_m"]) if fitted else None
+    # Nothing passed: R² is scale-free, so it compares a 1 m drop with a 5 mm sideways wobble fairly.
+    # r2 is None when it was not finite.
+    return max(fitted.values(), key=lambda r: -np.inf if r["r2"] is None else r["r2"]) if fitted else None
 
 
 def fitted_xy(box: Toolbox, fit_id: str) -> dict[str, list[float]]:

@@ -8,6 +8,7 @@ from physicslens.calibrate import Calibration
 from physicslens.ingest import load_video
 from physicslens.physics import models
 from physicslens.physics.fit import fit_free_fall
+from physicslens.pipeline import choose
 from physicslens.track.color import track_color
 
 FPS = 60
@@ -54,3 +55,14 @@ def test_calibration_rejects_nonpositive():
 def test_load_video_missing_file():
     with pytest.raises(FileNotFoundError):
         load_video("does-not-exist.mp4")
+
+
+def test_choose_falls_back_to_best_r2_not_smallest_rmse():
+    # A 1 m drop that fails a check vs a pendulum fit on a few mm of sideways wobble.
+    flagged = {"ok": False, "problems": ["g outside plausible"]}
+    results = [
+        {"name": "free_fall", "fit_id": "fit_1", "r2": 0.998, "rmse_m": 0.0147, "check": flagged},
+        {"name": "pendulum", "fit_id": "fit_2", "r2": 0.982, "rmse_m": 0.0005, "check": flagged},
+        {"name": "projectile", "fit_id": "fit_3", "r2": None, "rmse_m": 0.0001, "check": flagged},
+    ]
+    assert choose(results)["name"] == "free_fall"

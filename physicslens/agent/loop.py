@@ -26,17 +26,19 @@ or end (occlusion, a hand in frame), never just to make a check pass.
 full track fails the same model, is flagged. Prefer the full-track fit and explain its flag.
 - Report values with their uncertainty. Never invent numbers that no tool returned.
 - Finish with final_answer. Use accept_flagged only if the remaining problem is understood \
-(e.g. perspective curvature) and say so in the summary."""
+(e.g. perspective curvature) and say so in the summary.
+- If no fit can be trusted (too few points, the wrong object tracked), call final_answer \
+without fit_id and say in the summary what the user should change. Do not report a number."""
 
 FINAL_ANSWER = _schema(
     "final_answer",
     "Finish: report the fit you trust and a short plain-language summary with uncertainties.",
     {
-        "fit_id": {"type": "string"},
+        "fit_id": {"type": "string", "description": "Omit only when no measurement is possible."},
         "summary": {"type": "string"},
         "accept_flagged": {"type": "boolean", "description": "Report a fit that failed checks, with the reason."},
     },
-    ["fit_id", "summary"],
+    ["summary"],
 )
 
 
@@ -47,6 +49,8 @@ class AgentResult:
     check: dict | None
     steps: int
     transcript: list[Message] = field(default_factory=list)
+    # True when the model finished on purpose without a number: summary says what to change.
+    no_measurement: bool = False
 
 
 def _arguments(call: dict) -> dict:
@@ -69,6 +73,8 @@ def _dump(result: dict) -> str:
 def _finish(box: Toolbox, args: dict) -> tuple[dict, bool]:
     """Validate a final_answer call; returns (tool reply, accepted)."""
     fit_id = args.get("fit_id")
+    if fit_id is None:
+        return _no_measurement(box, args)
     if not isinstance(fit_id, str) or fit_id not in box.fits:
         return {"error": f"unknown fit_id {fit_id!r}; known: {sorted(box.fits)}"}, False
     check = box.check_plausibility(fit_id)
@@ -80,6 +86,16 @@ def _finish(box: Toolbox, args: dict) -> tuple[dict, bool]:
     if not check["ok"] and len(str(args.get("summary", "")).strip()) < MIN_REASON_CHARS:
         return {"error": f"{fit_id} failed plausibility: {check['problems']}. accept_flagged needs a summary that explains why."}, False
     return check, True
+
+
+def _no_measurement(box: Toolbox, args: dict) -> tuple[dict, bool]:
+    """Giving up is allowed only when no fit passes: the model cannot hide a good number."""
+    passing = sorted(fit_id for fit_id in box.fits if box.check_plausibility(fit_id)["ok"])
+    if passing:
+        return {"error": f"{passing[0]} passes every check; report it instead of giving up."}, False
+    if len(str(args.get("summary", "")).strip()) < MIN_REASON_CHARS:
+        return {"error": "no fit_id given: say in the summary why no measurement is possible and what to change."}, False
+    return {"ok": False, "no_measurement": True}, True
 
 
 def run_agent(
@@ -118,7 +134,9 @@ def run_agent(
                     result, done = _finish(box, args)
                     if done:
                         add(Message("tool", _dump(result), tool_call_id=call.get("id")))
-                        return AgentResult(args["fit_id"], str(args.get("summary", "")), result, step, messages)
+                        fit_id = args.get("fit_id")
+                        return AgentResult(fit_id, str(args.get("summary", "")), result if fit_id else None,
+                                           step, messages, no_measurement=fit_id is None)
                 else:
                     result = box.call(call.get("name"), args)
             add(Message("tool", _dump(result), tool_call_id=call.get("id")))
