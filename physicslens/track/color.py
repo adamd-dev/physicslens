@@ -26,9 +26,12 @@ def color_mask(frame: np.ndarray, hsv_lower, hsv_upper) -> np.ndarray:
     return cv2.morphologyEx(mask, cv2.MORPH_OPEN, _KERNEL)
 
 
-def pick_blob(mask: np.ndarray, min_area: int, previous: tuple[float, float] | None) -> tuple[float, float] | None:
+def pick_blob(
+    mask: np.ndarray, min_area: int, previous: tuple[float, float] | None, max_area: int | None = None
+) -> tuple[float, float] | None:
     n, _, stats, centroids = cv2.connectedComponentsWithStats(mask)
-    candidates = [i for i in range(1, n) if stats[i, cv2.CC_STAT_AREA] >= min_area]
+    areas = stats[:, cv2.CC_STAT_AREA]
+    candidates = [i for i in range(1, n) if areas[i] >= min_area and (max_area is None or areas[i] <= max_area)]
     if not candidates:
         return None
     if previous is None:
@@ -38,12 +41,30 @@ def pick_blob(mask: np.ndarray, min_area: int, previous: tuple[float, float] | N
     return float(centroids[best][0]), float(centroids[best][1])
 
 
-def track_color(video: Video, hsv_lower, hsv_upper, min_area: int = 20, max_jump_px: float | None = None) -> Track:
-    """Track one colored object; frames where it is lost or jumps too far are dropped, not guessed."""
+def track_color(
+    video: Video,
+    hsv_lower,
+    hsv_upper,
+    min_area: int = 20,
+    max_jump_px: float | None = None,
+    max_area: int | None = None,
+    roi: tuple[int, int, int, int] | None = None,
+) -> Track:
+    """Track one colored object; frames where it is lost or jumps too far are dropped, not guessed.
+
+    `max_area` skips same-colored objects bigger than the ball (a white board, a dark table edge);
+    `roi` = (x0, y0, x1, y1) in full-frame pixels limits the search like the motion tracker's.
+    """
     ts, xs, ys = [], [], []
     previous = None
     for frame, t in zip(video.frames, video.timestamps):
-        c = pick_blob(color_mask(frame, hsv_lower, hsv_upper), min_area, previous)
+        mask = color_mask(frame, hsv_lower, hsv_upper)
+        if roi is not None:
+            x0, y0, x1, y1 = roi
+            outside = np.ones_like(mask, bool)
+            outside[y0:y1, x0:x1] = False
+            mask[outside] = 0
+        c = pick_blob(mask, min_area, previous, max_area)
         if c is None:
             continue
         if previous is not None and max_jump_px is not None and np.hypot(c[0] - previous[0], c[1] - previous[1]) > max_jump_px:

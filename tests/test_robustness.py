@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 
 from physicslens.calibrate import Calibration
-from physicslens.ingest import _repair, load_video
+from physicslens.ingest import Video, _repair, load_video
 from physicslens.physics import models
 from physicslens.physics.fit import fit_free_fall, fit_projectile
 from physicslens.track.color import color_mask, track_color
@@ -55,6 +55,27 @@ def test_hidden_ball_and_distractor_do_not_corrupt_g(tmp_path):
     video = load_video(str(path))
     # Without gating the tracker would jump to the distractor while the ball is hidden.
     assert measure_g(video, max_jump_px=80) == pytest.approx(models.G, rel=0.02)
+
+
+def two_blob_video():
+    """A small white ball moving right, and a large white board fixed on the left."""
+    frames = []
+    for i in range(8):
+        f = np.zeros((120, 200, 3), np.uint8)
+        f[10:110, 5:45] = 255  # board: 4000 px
+        cv2.circle(f, (80 + 10 * i, 60), 6, (255, 255, 255), -1)
+        frames.append(f)
+    return Video(frames, np.arange(8) / 30, 30.0, 200, 120, "index", 1.0)
+
+
+def test_color_tracker_respects_max_area():
+    track = track_color(two_blob_video(), (0, 0, 200), (180, 60, 255), max_area=1000)
+    assert track.x[0] == pytest.approx(80, abs=1)
+
+
+def test_color_tracker_respects_roi():
+    track = track_color(two_blob_video(), (0, 0, 200), (180, 60, 255), roi=(60, 0, 200, 120))
+    assert np.all(track.x > 60)
 
 
 def test_red_hue_wraps_around_zero():

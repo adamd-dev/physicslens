@@ -46,9 +46,9 @@ def parse_args(argv=None):
     p.add_argument("--hsv-lower", type=lambda s: _numbers(s, 3, int), default=(0, 0, 200))
     p.add_argument("--hsv-upper", type=lambda s: _numbers(s, 3, int), default=(180, 60, 255))
     p.add_argument("--fields", choices=["none", "auto", "top", "bottom"], default="none", help="interlaced video")
-    p.add_argument("--roi", type=lambda s: _numbers(s, 4, int), help="x0,y0,x1,y1 search area (motion tracker)")
+    p.add_argument("--roi", type=lambda s: _numbers(s, 4, int), help="x0,y0,x1,y1 search area in full-frame pixels")
     p.add_argument("--min-area", type=int, default=10)
-    p.add_argument("--max-area", type=int, default=2000)
+    p.add_argument("--max-area", type=int, help="largest blob in px (default: 2000 for motion, no limit for color)")
     p.add_argument("--max-jump", type=float, help="max px between samples before a point is rejected")
     p.add_argument("--capture-fps", type=float, help="real capture rate of slow-motion clips, e.g. 240")
     p.add_argument("--start", type=float, default=0.0)
@@ -115,8 +115,10 @@ def report_agent(args, data: TrackData, box: Toolbox, video_warnings) -> int:
 
 def track(args, video):
     if args.tracker == "color":
-        return "none", track_color(video, args.hsv_lower, args.hsv_upper, args.min_area, args.max_jump)
-    kw = dict(min_area=args.min_area, max_area=args.max_area, max_jump_px=args.max_jump, roi=args.roi)
+        return "none", track_color(
+            video, args.hsv_lower, args.hsv_upper, args.min_area, args.max_jump, max_area=args.max_area, roi=args.roi
+        )
+    kw = dict(min_area=args.min_area, max_area=args.max_area or 2000, max_jump_px=args.max_jump, roi=args.roi)
     if args.fields == "auto":
         return field_order(video, **kw)
     fields = None if args.fields == "none" else args.fields
