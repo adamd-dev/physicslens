@@ -14,19 +14,20 @@ import re
 import threading
 import uuid
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Literal
 
 import cv2
 import numpy as np
 from fastapi import FastAPI, HTTPException, UploadFile
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from .agent.loop import run_agent
 from .agent.tools import Toolbox
 from .calibrate import Calibration
 from .llm.meta_client import PROJECT_ROOT, LLMError, MetaClient
+from .llm.sam_client import SamClient
 from .physics import models
 from .pipeline import (
     TrackSettings,
@@ -56,6 +57,11 @@ _busy = threading.Lock()  # one analysis at a time: frames are memory-heavy and 
 def make_client():
     """The runtime model; tests swap this for a scripted MockClient."""
     return MetaClient.from_env()
+
+
+def make_sam_client():
+    """SAM 3.1 for the "sam" tracker; tests swap this for a scripted fake."""
+    return SamClient.from_env(cost_log=COSTS)
 
 
 def _video_path(video_id: str) -> Path:
@@ -143,10 +149,13 @@ class Scale(BaseModel):
         raise ValueError("scale needs px_per_m, or p1, p2 and length_m")
 
 
+Coord = Annotated[int, Field(ge=0, le=20000)]
+
+
 class Settings(BaseModel):
     """Tracking settings in source pixels, as the user sees the video."""
 
-    tracker: Literal["motion", "color"] = "motion"
+    tracker: Literal["motion", "color", "sam"] = "motion"
     hsv_lower: tuple[int, int, int] = (0, 0, 200)
     hsv_upper: tuple[int, int, int] = (180, 60, 255)
     fields: Literal["none", "auto", "top", "bottom"] = "none"
@@ -154,16 +163,36 @@ class Settings(BaseModel):
     min_area: int = Field(10, ge=1)
     max_area: int | None = Field(None, ge=1)
     max_jump: float | None = Field(None, gt=0)
+    # Around the object on the first frame of the window, source pixels.
+    sam_box: tuple[Coord, Coord, Coord, Coord] | None = None
+    # A noun phrase only: "<" and "|" would let raw SAM prompt tokens through.
+    sam_prompt: str = Field(default="ball", min_length=1, max_length=80, pattern=r"^[A-Za-z0-9 ,.'-]+$")
+
+    @field_validator("sam_box")
+    @classmethod
+    def _ordered(cls, box):
+        if box is not None and not (box[0] < box[2] and box[1] < box[3]):
+            raise ValueError("sam_box must be x0,y0,x1,y1 with x0 < x1 and y0 < y1")
+        return box
 
     def scaled(self, s: float) -> TrackSettings:
         """The same settings in decoded pixels, after the frames were shrunk by `s`."""
         return TrackSettings(
-            self.tracker, self.hsv_lower, self.hsv_upper, self.fields,
-            tuple(round(v * s) for v in self.roi) if self.roi else None,
-            max(1, round(self.min_area * s * s)),
-            max(1, round(self.max_area * s * s)) if self.max_area else None,
-            self.max_jump * s if self.max_jump else None,
+            tracker=self.tracker, hsv_lower=self.hsv_lower, hsv_upper=self.hsv_upper, fields=self.fields,
+            roi=_scale_box(self.roi, s),
+            min_area=max(1, round(self.min_area * s * s)),
+            max_area=max(1, round(self.max_area * s * s)) if self.max_area else None,
+            max_jump=self.max_jump * s if self.max_jump else None,
+            sam_box=_scale_box(self.sam_box, s),
+            sam_prompt=self.sam_prompt,
         )
+
+
+def _scale_box(box: tuple[int, int, int, int] | None, s: float) -> tuple[int, int, int, int] | None:
+    if box is None:
+        return None
+    x0, y0, x1, y1 = box
+    return round(x0 * s), round(y0 * s), round(x1 * s), round(y1 * s)
 
 
 class AnalyzeRequest(BaseModel):
@@ -193,11 +222,22 @@ def _clean(value):
     return value
 
 
-def _spent() -> float:
+def _spent() -> float | None:
+    """Logged spend; None when the log is unreadable, so cost reporting never hides the real error."""
     if not COSTS.is_file():
         return 0.0
-    with COSTS.open(newline="") as f:
-        return sum(float(row["cost_usd"]) for row in csv.DictReader(f))
+    try:
+        with COSTS.open(newline="") as f:
+            return sum(float(row["cost_usd"]) for row in csv.DictReader(f))
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+
+
+def _cost_event(before: float | None) -> dict | None:
+    now = _spent()
+    if before is None or now is None:
+        return None
+    return {"run_usd": now - before, "total_usd": now}
 
 
 def _result(box: Toolbox, fit_id: str, px_per_m: float, t_offset: float, time_scale: float, check: dict) -> dict:
@@ -238,12 +278,16 @@ def _analyze(req: AnalyzeRequest, emit) -> None:
     emit("video", {"frames": len(video.frames), "fps": video.fps, "timestamp_source": video.timestamp_source,
                    "scale": s, "warnings": video_warnings})
 
+    before = _spent()
     emit("status", {"stage": "tracking"})
     try:
-        fields, tr = track(video, req.settings.scaled(s))
+        fields, tr, track_notes = track(video, req.settings.scaled(s), sam=lambda: make_sam_client())
     except ValueError as exc:
         emit("error", {"stage": "tracking", "message": str(exc)})
         return
+    finally:
+        if req.settings.tracker == "sam" and (cost := _cost_event(before)):
+            emit("cost", cost)
     full = tr
     rest_notes: list[str] = []
     rest = np.zeros(len(full), bool)  # dropped samples, still drawn on the video so the user sees them
@@ -258,6 +302,7 @@ def _analyze(req: AnalyzeRequest, emit) -> None:
     t_offset = req.start + float(tr.t[0])  # real seconds from the clip start to the first sample
     emit("track", {
         "fields": fields,
+        "source": tr.source,
         "px_per_m": calibration.px_per_m,
         "t": data.t.tolist(),
         "t_play": [(req.start + t) / video.time_scale for t in tr.t],
@@ -265,7 +310,7 @@ def _analyze(req: AnalyzeRequest, emit) -> None:
         "y_px": (tr.y / s).tolist(),
         "x_m": data.x.tolist(),
         "y_m": data.y.tolist(),
-        "notes": rest_notes,
+        "notes": [*track_notes, *rest_notes],
         "rest": {
             "t_play": [(req.start + t) / video.time_scale for t in full.t[rest]],
             "x_px": (full.x[rest] / s).tolist(),
@@ -273,7 +318,6 @@ def _analyze(req: AnalyzeRequest, emit) -> None:
         },
     })
 
-    before = _spent()
     if req.agent:
         emit("status", {"stage": "agent"})
         question = agent_question(req.height_m, rest_notes)
@@ -284,7 +328,8 @@ def _analyze(req: AnalyzeRequest, emit) -> None:
             emit("error", {"stage": "agent", "message": str(exc)})
             return
         finally:
-            emit("cost", {"run_usd": _spent() - before, "total_usd": _spent()})
+            if cost := _cost_event(before):
+                emit("cost", cost)
         if outcome.fit_id is None:
             stage = "no measurement" if outcome.no_measurement else "agent"
             emit("error", {"stage": stage, "message": outcome.summary, "steps": outcome.steps})

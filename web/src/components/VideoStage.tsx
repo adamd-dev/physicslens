@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 import type { Point, Result, TrackEvent, VideoInfo } from "../api";
 import { videoUrl } from "../api";
 
-export type Mode = "view" | "calibrate" | "roi";
+export type Mode = "view" | "calibrate" | "roi" | "ball";
 export type Roi = [number, number, number, number];
 
 interface Props {
@@ -11,10 +11,13 @@ interface Props {
   points: Point[]; // calibration clicks, source pixels
   lengthM: number;
   roi: Roi | null;
+  ballBox: Roi | null; // SAM's object prompt, drawn on the first frame
+  startS: number;
   track: TrackEvent | null;
   result: Result | null;
   onPoints: (p: Point[]) => void;
   onRoi: (r: Roi | null) => void;
+  onBallBox: (r: Roi | null) => void;
 }
 
 const CYAN = "#22d3ee";
@@ -24,15 +27,25 @@ const HINT: Record<Mode, string> = {
   view: "Video with the tracked points and the fitted curve drawn on top",
   calibrate: "Click both ends of the reference object",
   roi: "Drag a box around the ball's path",
+  ball: "Drag a tight box around the ball on this first frame",
 };
 
-export default function VideoStage({ info, mode, points, lengthM, roi, track, result, onPoints, onRoi }: Props) {
+export default function VideoStage({ info, mode, points, lengthM, roi, ballBox, startS, track, result, onPoints, onRoi, onBallBox }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const drag = useRef<{ start: Point; now: Point } | null>(null);
   // The draw loop reads the latest props through this ref instead of restarting on every change.
-  const state = useRef({ mode, points, lengthM, roi, track, result });
-  state.current = { mode, points, lengthM, roi, track, result };
+  const state = useRef({ mode, points, lengthM, roi, ballBox, track, result });
+  state.current = { mode, points, lengthM, roi, ballBox, track, result };
+
+  // SAM follows the object from the first analysed frame, so the box is drawn on that frame.
+  useEffect(() => {
+    const video = videoRef.current;
+    if (mode === "ball" && video) {
+      video.pause();
+      video.currentTime = startS;
+    }
+  }, [mode, startS]);
 
   useEffect(() => {
     let frame = 0;
@@ -55,7 +68,8 @@ export default function VideoStage({ info, mode, points, lengthM, roi, track, re
       const s = state.current;
       const now = video.currentTime;
 
-      const box = drag.current ? toRoi(drag.current.start, drag.current.now) : s.roi;
+      const dragging = drag.current ? toRoi(drag.current.start, drag.current.now) : null;
+      const box = s.mode === "roi" && dragging ? dragging : s.roi;
       if (box) {
         const [x0, y0, x1, y1] = box.map((v) => v * k);
         ctx.fillStyle = "rgba(2,6,23,0.55)";
@@ -68,6 +82,15 @@ export default function VideoStage({ info, mode, points, lengthM, roi, track, re
         ctx.lineWidth = 1.5;
         ctx.strokeRect(x0, y0, x1 - x0, y1 - y0);
         ctx.setLineDash([]);
+      }
+
+      const ball = s.mode === "ball" && dragging ? dragging : s.ballBox;
+      if (ball) {
+        const [x0, y0, x1, y1] = ball.map((v) => v * k);
+        ctx.strokeStyle = VIOLET;
+        ctx.lineWidth = 2;
+        ctx.strokeRect(x0, y0, x1 - x0, y1 - y0);
+        label(ctx, "SAM", (x0 + x1) / 2, y0 - 14, VIOLET);
       }
 
       if (s.points.length) {
@@ -149,13 +172,15 @@ export default function VideoStage({ info, mode, points, lengthM, roi, track, re
   const toSource = (e: React.PointerEvent<HTMLCanvasElement>): Point => {
     const rect = e.currentTarget.getBoundingClientRect();
     const k = info.width / rect.width;
-    return [Math.round((e.clientX - rect.left) * k), Math.round((e.clientY - rect.top) * k)];
+    // Pointer capture keeps reporting past the video edge: clamp, a box may not leave the frame.
+    const clamp = (v: number, max: number) => Math.min(Math.max(Math.round(v), 0), max);
+    return [clamp((e.clientX - rect.left) * k, info.width), clamp((e.clientY - rect.top) * k, info.height)];
   };
 
   const onPointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
     const p = toSource(e);
     if (mode === "calibrate") onPoints(points.length === 1 ? [points[0], p] : [p]);
-    if (mode === "roi") {
+    if (mode === "roi" || mode === "ball") {
       e.currentTarget.setPointerCapture(e.pointerId);
       drag.current = { start: p, now: p };
     }
@@ -167,7 +192,9 @@ export default function VideoStage({ info, mode, points, lengthM, roi, track, re
     if (!drag.current) return;
     const box = toRoi(drag.current.start, drag.current.now);
     drag.current = null;
-    onRoi(box[2] - box[0] > 8 && box[3] - box[1] > 8 ? box : null);
+    // A ball can be a few pixels wide: the SAM box only needs to be a real drag, not a big one.
+    if (mode === "ball") onBallBox(box[2] - box[0] > 2 && box[3] - box[1] > 2 ? box : null);
+    else onRoi(box[2] - box[0] > 8 && box[3] - box[1] > 8 ? box : null);
   };
 
   return (

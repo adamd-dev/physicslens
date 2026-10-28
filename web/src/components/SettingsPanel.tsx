@@ -57,9 +57,17 @@ export default function SettingsPanel({ settings, options, onSettings, onOptions
       </label>
 
       <div className="grid grid-cols-2 gap-3">
-        <Select label="Tracker" value={settings.tracker} options={[["motion", "Motion"], ["color", "Color"]]} onChange={(tracker) => set({ tracker })} />
+        <Select label="Tracker" value={settings.tracker} options={[["motion", "Motion"], ["color", "Color"], ["sam", "SAM 3.1 (Meta)"]]} onChange={(tracker) => set({ tracker })} />
         <Num label="Launch height (m)" value={options.height_m} step={0.01} placeholder="cup shot" onChange={(height_m) => opt({ height_m })} />
       </div>
+
+      {settings.tracker === "sam" && (
+        <label className="block">
+          <span className="label">Object (used without a ball box)</span>
+          <input className="input mt-1" maxLength={80} value={settings.sam_prompt} onChange={(e) => set({ sam_prompt: e.target.value })} />
+          <span className="mt-1 block text-sm text-slate-400">Best: use “Ball” under the video and box the ball on the first frame. A small ball is often missed by text. The analysed clip is sent to Meta's API.</span>
+        </label>
+      )}
 
       <label className="flex cursor-pointer items-center justify-between gap-3 text-sm text-slate-300">
         <span>

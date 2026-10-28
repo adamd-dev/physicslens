@@ -12,7 +12,7 @@ Durable decisions and hard-won facts that the code and git history do not explai
 - Model id `meta-models/muse-spark-open-1026` from early notes was not found anywhere; docs show `meta-models/muse-spark-open`. Keep the model id configurable.
 - Confirmed by real runs 2026-10-28: Muse sends tool `arguments` as a JSON string, often several tool calls per turn, and empty text content on the final turn. A run costs about $0.01 to $0.03 (4 to 12 steps).
 - python.org Python 3.13 on macOS ships without root certificates (`CERTIFICATE_VERIFY_FAILED`). Fixed by running `/Applications/Python 3.13/Install Certificates.command`.
-- SAM 3.1: model `sam-3.1` via Responses streaming; text prompt (e.g. "ball") or box/point tokens, not both. One text line per frame with boxes in source pixels and base85 masks. Frames can be missing or out of order; object ids are not dense. $0.20 per 1000 frames, 50-frame minimum per request.
+- SAM 3.1: model `sam-3.1` via Responses streaming; text prompt (e.g. "ball") or box/point tokens, not both. One text line per frame with boxes in source pixels and base85 masks. Frames can be missing or out of order; object ids are not dense. $0.20 per 1000 frames, 50-frame minimum per request. Tested 2026-10-28: a text prompt ("ball", "pendulum bob") found nothing on the sample clips; a box prompt on frame 0 tracks well (BallDrop g 9.65, Commons pendulum L 0.590). The box is the main mode. `usage.video_frames_processed` is the billed count (minimum 50), not the decoded count.
 
 ## Real-video lessons
 - Samsung slow motion (A37: 720p 240 fps) plays back at 30 fps: pass `--capture-fps 240` or g comes out 64x too small.
