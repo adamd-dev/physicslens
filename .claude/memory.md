@@ -20,6 +20,11 @@ Durable decisions and hard-won facts that the code and git history do not explai
 - A white metre stick defeats the color tracker; the motion tracker removes it via median background, and its tick marks flicker under compression, so pixels moving in >30% of frames are masked.
 - Reference results: BallDrop g = 9.728 ± 0.021 (-0.8%, all checks pass); BallTossOut g = 10.01 (+2.1%, U-shaped x residuals, likely perspective); Pendulum L = 1.005 m vs 1 m (one cycle only, flagged).
 - Tracker sample videos have no stated license: keep them out of git and out of the demo.
+- Third-party clip that works: Wikimedia Commons "Fadenpendelgeschwindigkeit (2 grad).webm" by Mathe-AC Lernwerkstatt Aachen, CC BY 4.0 (credit required; commercial use allowed). It shows a 60 cm pendulum in front of a cm ruler (about 197 px/cm at 1080p).
+  - Only 68.3 to 71.8 s is usable real-time footage. Elsewhere there are freezes, montage cuts and slow motion.
+  - Its 24 fps footage sits in a 25 fps container with one frame duplicated per second, so residuals are structured.
+  - Cut with: rows 600 to 980, half scale, start at 67.6 s, length 4.8 s. Run with `--tracker color --hsv-upper 180,255,75 --min-area 3000 --px-per-m 9850 --start 0.6`. Result: L = 0.590 m (−1.7%), T = 1.541 s (the author measured 1.54).
+- Direct Measurement Videos (SERC) now redirect to Pivot Interactives (paid) and are no longer usable. Its "Impaktecholot" drop is filmed along the fall axis, so it cannot be tracked.
 
 ## Agent behaviour lessons
 - Window shopping: on BallTossOut, Muse fitted 12 time windows until one passed the runs test (12/21 points, g = 9.845, "ok"). A shorter window weakens the test, so the curvature was hidden, not fixed.
