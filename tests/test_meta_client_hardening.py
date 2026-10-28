@@ -6,7 +6,13 @@ import json
 import pytest
 
 from physicslens.llm.base import Message
-from physicslens.llm.meta_client import BudgetExceededError, LLMConfigError, LLMRequestError, MetaClient, to_wire_messages
+from physicslens.llm.meta_client import (
+    BudgetExceededError,
+    LLMConfigError,
+    LLMRequestError,
+    MetaClient,
+    to_wire_messages,
+)
 from tests.test_meta_client import KEY, FakePost, client, ok_body
 
 GO = [Message("user", "go")]

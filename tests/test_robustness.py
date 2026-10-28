@@ -24,7 +24,7 @@ def write_drop(path, capture_fps, playback_fps, n_frames, hidden=(), distractor=
             cv2.circle(frame, (80, 400), 7, (255, 255, 255), -1)
         if i not in hidden:
             y_px = 50 + PX_PER_M * models.free_fall(max(i - hold_frames, 0) / capture_fps, 0, 0, models.G)
-            cv2.circle(frame, (320 * scale, int(round(y_px * scale))), 12 * scale, (255, 255, 255), -1, cv2.LINE_AA, SHIFT)
+            cv2.circle(frame, (320 * scale, round(y_px * scale)), 12 * scale, (255, 255, 255), -1, cv2.LINE_AA, SHIFT)
         writer.write(frame)
     writer.release()
 

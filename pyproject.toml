@@ -21,7 +21,8 @@ dependencies = [
 
 [project.optional-dependencies]
 ui = ["fastapi>=0.115", "uvicorn>=0.30", "python-multipart>=0.0.9"]
-dev = ["pytest>=8", "httpx>=0.27"]
+# Linters pinned: a new ruff or mypy release can add rules and fail CI on unchanged code.
+dev = ["pytest>=8", "httpx>=0.27", "ruff==0.17.3", "mypy==1.20.2"]
 
 [project.scripts]
 physicslens-ui = "physicslens.server:main"
@@ -29,3 +30,12 @@ physicslens-ui = "physicslens.server:main"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+
+[tool.mypy]
+# Pydantic models get their real __init__ signature (field defaults are optional arguments).
+plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+# scipy ships no type stubs; scipy-stubs is not worth a dependency for one curve_fit call.
+module = ["scipy.*"]
+ignore_missing_imports = true

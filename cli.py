@@ -117,22 +117,22 @@ def report_agent(args, data: TrackData, box: Toolbox, video_warnings: Sequence[s
     if result.no_measurement:
         print(f"agent: no measurement possible: {result.summary}", file=sys.stderr)
         return 4
-    if result.fit_id is None:
+    if result.fit_id is None or result.check is None or result.fit_id not in box.fits:
         print(f"agent gave no accepted answer after {result.steps} steps: {result.summary}", file=sys.stderr)
         return 4
     # Measured values first: they come from the tools, the summary comes from the model.
-    fit = box.fits[result.fit_id]
-    status = "ok" if result.check["ok"] else "; ".join(result.check["problems"])
+    fit, check = box.fits[result.fit_id], result.check
+    status = "ok" if check["ok"] else "; ".join(check["problems"])
     print(f"agent chose {result.fit_id} ({fit.model}) in {result.steps} steps: r2={fit.r2:.5f} [{status}]")
     total = total_stderr(fit, box.scale_rel_err)  # fit noise plus the scale reading
     for name, value in fit.params.items():
         print(f"  {name} = {value:.4f} ± {total[name]:.4f}")
     print(f"\n  model summary (written by the model, not verified): {result.summary}")
-    if not result.check["ok"]:
+    if not check["ok"]:
         print(f"WARNING: the model accepted a fit that failed checks: {status}", file=sys.stderr)
     if args.plot:
         plot(args.plot, data, box, {"fit_id": result.fit_id, "model": fit.model}, args.axis)
-    return 0 if result.check["ok"] else 1
+    return 0 if check["ok"] else 1
 
 
 def settings(args) -> TrackSettings:

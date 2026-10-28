@@ -3,6 +3,7 @@
 import warnings
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
+from typing import Any
 
 import numpy as np
 
@@ -88,11 +89,10 @@ def track(video: Video, s: TrackSettings, sam: Callable[[], Segmenter] = _sam_cl
             return fields, tr, [note]
     if s.tracker == "color":
         return "none", track_color(video, s.hsv_lower, s.hsv_upper, s.min_area, s.max_jump, max_area=s.max_area, roi=s.roi), []
-    kw = dict(min_area=s.min_area, max_area=s.max_area or MOTION_MAX_AREA, max_jump_px=s.max_jump, roi=s.roi)
+    kw: dict[str, Any] = {"min_area": s.min_area, "max_area": s.max_area or MOTION_MAX_AREA, "max_jump_px": s.max_jump, "roi": s.roi}
     if s.fields == "auto":
         return (*field_order(video, **kw), [])
-    fields = None if s.fields == "none" else s.fields
-    return s.fields, track_motion(video, fields=fields, **kw), []
+    return s.fields, track_motion(video, fields=None if s.fields == "none" else s.fields, **kw), []
 
 
 def _still_run(t: np.ndarray, x: np.ndarray, y: np.ndarray, radius_px: float) -> int:

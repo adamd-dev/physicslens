@@ -211,7 +211,7 @@ class Toolbox:
             return getattr(self, name)(**arguments)
         except (ValueError, TypeError, RuntimeError) as exc:
             return {"error": str(exc)}
-        except Exception as exc:  # numpy/scipy edge cases (overflow, LinAlgError) must not end the run
+        except Exception as exc:  # noqa: BLE001 - numpy/scipy edge cases (overflow, LinAlgError) must not end the run
             return {"error": f"{type(exc).__name__}: {exc}"}
 
 

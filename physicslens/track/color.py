@@ -21,7 +21,7 @@ def color_mask(frame: np.ndarray, hsv_lower, hsv_upper) -> np.ndarray:
     else:
         # Red wraps around hue 0/180: take [lower_h, 180] and [0, upper_h].
         mask = cv2.inRange(hsv, lower, np.array([180, upper[1], upper[2]], np.uint8))
-        mask |= cv2.inRange(hsv, np.array([0, lower[1], lower[2]], np.uint8), upper)
+        mask = cv2.bitwise_or(mask, cv2.inRange(hsv, np.array([0, lower[1], lower[2]], np.uint8), upper))
     # Opening removes single-pixel specks that would otherwise pass as the ball.
     return cv2.morphologyEx(mask, cv2.MORPH_OPEN, _KERNEL)
 

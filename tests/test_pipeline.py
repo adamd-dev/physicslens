@@ -22,7 +22,7 @@ def write_falling_ball(path, duration_s=0.45, size=(640, 480)):
     for t in np.arange(0, duration_s, 1 / FPS):
         frame = np.zeros((size[1], size[0], 3), np.uint8)
         y_px = 50 + PX_PER_M * models.free_fall(t, 0, 0, models.G)
-        center = (int(320 * scale), int(round(y_px * scale)))
+        center = (int(320 * scale), round(y_px * scale))
         cv2.circle(frame, center, 12 * scale, (255, 255, 255), -1, cv2.LINE_AA, SUBPIXEL_SHIFT)
         writer.write(frame)
     writer.release()

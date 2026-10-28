@@ -334,7 +334,7 @@ def _analyze(req: AnalyzeRequest, emit) -> None:
         finally:
             if cost := _cost_event(before):
                 emit("cost", cost)
-        if outcome.fit_id is None:
+        if outcome.fit_id is None or outcome.check is None or outcome.fit_id not in box.fits:
             stage = "no measurement" if outcome.no_measurement else "agent"
             emit("error", {"stage": stage, "message": outcome.summary, "steps": outcome.steps})
             return
@@ -371,7 +371,7 @@ def analyze(req: AnalyzeRequest) -> StreamingResponse:
     def work() -> None:
         try:
             _analyze(req, lambda name, data: events.put(_event(name, data)))
-        except Exception as exc:  # the stream must end with an error event, never hang the UI
+        except Exception as exc:  # noqa: BLE001 - the stream must end with an error event, never hang the UI
             events.put(_event("error", {"stage": "internal", "message": f"{type(exc).__name__}: {exc}"}))
         finally:
             events.put(_event("done", {}))
