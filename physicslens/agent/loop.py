@@ -60,7 +60,7 @@ def _arguments(call: dict) -> dict:
     if isinstance(args, str):
         args = json.loads(args)
     if not isinstance(args, dict):
-        raise ValueError(f"arguments must be a JSON object, got {type(args).__name__}")
+        raise ValueError(f"arguments must be a JSON object, got {type(args).__name__}")  # noqa: TRY004 (callers report ValueError as a bad tool call)
     return args
 
 
@@ -139,6 +139,6 @@ def run_agent(
                         return AgentResult(fit_id, str(args.get("summary", "")), result if fit_id else None,
                                            step, messages, no_measurement=fit_id is None)
                 else:
-                    result = box.call(call.get("name"), args)
+                    result = box.call(str(call.get("name")), args)
             add(Message("tool", _dump(result), tool_call_id=call.get("id")))
     return AgentResult(None, f"stopped after {max_steps} steps without an accepted answer", None, max_steps, messages)

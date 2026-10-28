@@ -20,7 +20,7 @@ def ball_y(t):
 
 def draw(frame, y, x=160, rows=slice(None)):
     layer = frame.copy()
-    cv2.circle(layer, (x, int(round(y))), 6, (255, 255, 255), -1)
+    cv2.circle(layer, (x, round(y)), 6, (255, 255, 255), -1)
     frame[rows] = layer[rows]
 
 

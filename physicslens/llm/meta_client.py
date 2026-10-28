@@ -18,9 +18,9 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import warnings
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from .base import Message, Reply
 
@@ -82,7 +82,7 @@ def _arguments_json(arguments) -> str:
 def to_wire_messages(messages: list[Message]) -> list[dict]:
     wire = []
     for m in messages:
-        item = {"role": m.role, "content": m.content}
+        item: dict[str, Any] = {"role": m.role, "content": m.content}
         if m.tool_calls:
             # OpenAI expects null content on a pure tool-call turn.
             item["content"] = m.content or None
@@ -113,7 +113,9 @@ def from_wire(body: dict) -> tuple[Reply, tuple[int, int] | None]:
         reply = Reply(message.get("content") or "", calls)
     except (KeyError, IndexError, TypeError, AttributeError) as exc:
         raise LLMResponseError(f"unexpected chat completion shape: bad or missing {exc}") from None
-    usage = body.get("usage") if isinstance(body.get("usage"), dict) else {}
+    usage = body.get("usage")
+    if not isinstance(usage, dict):
+        usage = {}
     prompt, completion = _tokens(usage.get("prompt_tokens")), _tokens(usage.get("completion_tokens"))
     return reply, (prompt, completion) if prompt is not None and completion is not None else None
 
@@ -122,13 +124,12 @@ def from_wire(body: dict) -> tuple[Reply, tuple[int, int] | None]:
 
 def read_dotenv(path: Path) -> dict[str, str]:
     """Minimal KEY=VALUE parser: comments, blank lines and `export ` skipped, matched quotes stripped."""
-    values = {}
+    values: dict[str, str] = {}
     if not path.is_file():
         return values
     for line in path.read_text(encoding="utf-8-sig").splitlines():
         line = line.strip()
-        if line.startswith("export "):
-            line = line[len("export "):]
+        line = line.removeprefix("export ")
         if not line or line.startswith("#") or "=" not in line:
             continue
         key, _, value = line.partition("=")
@@ -287,13 +288,16 @@ class MetaClient:
         self._log_row(tokens, cost, "estimated" if estimated else "measured")
 
     def _log_row(self, tokens: tuple[int, int], cost: float, how: Literal["measured", "estimated"]) -> None:
-        new = not self.cost_log.is_file()
-        self.cost_log.parent.mkdir(parents=True, exist_ok=True)
-        with self.cost_log.open("a", newline="") as f:
+        log = self.cost_log
+        if log is None:
+            return
+        new = not log.is_file()
+        log.parent.mkdir(parents=True, exist_ok=True)
+        with log.open("a", newline="") as f:
             writer = csv.writer(f)
             if new:
                 writer.writerow(COST_FIELDS)
-            writer.writerow([datetime.now(timezone.utc).isoformat(), self.model, tokens[0], tokens[1], f"{cost:.6f}", how])
+            writer.writerow([datetime.now(UTC).isoformat(), self.model, tokens[0], tokens[1], f"{cost:.6f}", how])
 
     # --- cache -------------------------------------------------------------------
 
@@ -338,11 +342,9 @@ class MetaClient:
             except OSError as exc:
                 warnings.warn(f"could not write cache entry: {exc}")
         if self.cost_log:
-            estimated = tokens is None
-            if estimated:
-                tokens = (len(body) // CHARS_PER_TOKEN, len(raw) // CHARS_PER_TOKEN)
+            estimate = (len(body) // CHARS_PER_TOKEN, len(raw) // CHARS_PER_TOKEN)
             try:
-                self._log_cost(tokens, estimated)
+                self._log_cost(tokens or estimate, tokens is None)
             except OSError as exc:
                 warnings.warn(f"could not write cost log {self.cost_log}: {exc}")
         return reply
@@ -376,7 +378,7 @@ class MetaClient:
                 status, resp_headers, raw = self._post(url, headers, body, self.timeout)
             except (OSError, http.client.HTTPException) as exc:  # URLError, timeouts, dropped connections
                 failure = f"network error: {self._redact(f'{type(exc).__name__}: {exc}')}"
-            except Exception as exc:  # anything else may quote the Authorization header
+            except Exception as exc:  # noqa: BLE001 - anything else may quote the Authorization header
                 raise LLMTransportError(f"request failed: {self._redact(f'{type(exc).__name__}: {exc}')}") from None
             else:
                 if status == 200:

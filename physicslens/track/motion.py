@@ -69,7 +69,7 @@ def track_motion(
         # Areas are given in full-frame pixels; a field has half the rows.
         mask = _sized_blobs(moving, min_area / y_scale, max_area / y_scale)
         # Compare in field coordinates so the continuity check uses like with like.
-        prev_field = None if previous is None else (previous[0], (previous[1] - y_offset) / y_scale)
+        prev_field: tuple[float, float] | None = None if previous is None else (previous[0], (previous[1] - y_offset) / y_scale)
         c = pick_blob(mask, min_area / y_scale, prev_field)
         if c is None:
             continue
@@ -77,12 +77,12 @@ def track_motion(
         ts.append(t)
         xs.append(previous[0])
         ys.append(previous[1])
-    ts, xs, ys = np.array(ts), np.array(xs), np.array(ys)
-    if max_jump_px is not None and len(ts) > 1:
-        ts, xs, ys = _longest_segment(ts, xs, ys, max_jump_px, max_gap_s=3.5 / video.fps)
-    if len(ts) < MIN_POINTS:
-        raise ValueError(f"moving object found in only {len(ts)} samples; adjust threshold or area limits")
-    return Track(ts, xs, ys, source="motion" if fields is None else f"motion-{fields}")
+    t_arr, x_arr, y_arr = np.array(ts), np.array(xs), np.array(ys)
+    if max_jump_px is not None and len(t_arr) > 1:
+        t_arr, x_arr, y_arr = _longest_segment(t_arr, x_arr, y_arr, max_jump_px, max_gap_s=3.5 / video.fps)
+    if len(t_arr) < MIN_POINTS:
+        raise ValueError(f"moving object found in only {len(t_arr)} samples; adjust threshold or area limits")
+    return Track(t_arr, x_arr, y_arr, source="motion" if fields is None else f"motion-{fields}")
 
 
 def _longest_segment(ts, xs, ys, max_jump_px: float, max_gap_s: float):
