@@ -21,7 +21,7 @@ from physicslens.agent.tools import Toolbox, TrackData
 from physicslens.calibrate import Calibration
 from physicslens.llm.meta_client import LLMError, MetaClient
 from physicslens.physics import models
-from physicslens.pipeline import FITS, TrackSettings, choose, load, run_fits, to_track_data, track
+from physicslens.pipeline import FITS, TrackSettings, choose, load, release_question, run_fits, to_track_data, track, trim_rest
 
 
 def _numbers(text: str, n: int, cast=float):
@@ -54,6 +54,8 @@ def parse_args(argv=None):
     p.add_argument("--plot", help="save trajectory and residual plot to this PNG")
     p.add_argument("--json", action="store_true", help="print the full result as JSON")
     p.add_argument("--agent", action="store_true", help="let the Muse agent choose, check and report (needs MODEL_API_KEY)")
+    p.add_argument("--keep-rest", action="store_true",
+                   help="keep samples where the ball is still (held before release, lying after landing)")
     p.add_argument("--transcript", help="save the agent's messages and tool calls to this JSON file")
     args = p.parse_args(argv)
     if args.transcript and not args.agent:
@@ -70,13 +72,14 @@ def make_client():
     return MetaClient.from_env()
 
 
-def report_agent(args, data: TrackData, box: Toolbox, video_warnings) -> int:
+def report_agent(args, data: TrackData, box: Toolbox, video_warnings, rest_notes=()) -> int:
     """Exit codes: 0 accepted and plausible, 1 accepted but flagged, 3 setup/API failure, 4 no answer."""
     for w in video_warnings:
         print(f"  warning: {w}", file=sys.stderr)
     question = "Measure the physics in this tracked trajectory."
     if args.height:
         question += f" The launch edge is {args.height} m above the landing surface; if this is a projectile, predict where it lands."
+    question += release_question(list(rest_notes))
     try:
         result = run_agent(make_client(), box, question)
     except (LLMError, OSError, ValueError) as exc:
@@ -150,10 +153,14 @@ def main(argv=None) -> int:
     except ValueError as exc:
         print(f"tracking failed: {exc}", file=sys.stderr)
         return 2
+    rest_notes: list[str] = []
+    if not args.keep_rest:
+        tr, rest_notes = trim_rest(tr, calibration.px_per_m)
+    video_warnings = video_warnings + rest_notes
     data = to_track_data(tr, calibration)
     box = Toolbox(data)
     if args.agent:
-        return report_agent(args, data, box, video_warnings)
+        return report_agent(args, data, box, video_warnings, rest_notes)
     results = run_fits(box, args.model, args.axis)
     best = choose(results)
 

@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Literal
 
 import cv2
+import numpy as np
 from fastapi import FastAPI, HTTPException, UploadFile
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -27,7 +28,7 @@ from .agent.tools import Toolbox
 from .calibrate import Calibration
 from .llm.meta_client import PROJECT_ROOT, LLMError, MetaClient
 from .physics import models
-from .pipeline import TrackSettings, choose, fitted_xy, load, run_fits, to_track_data, track
+from .pipeline import TrackSettings, choose, fitted_xy, load, release_question, run_fits, to_track_data, track, trim_rest
 
 UPLOADS = PROJECT_ROOT / "cache" / "uploads"
 WEB_DIST = PROJECT_ROOT / "web" / "dist"
@@ -166,6 +167,7 @@ class AnalyzeRequest(BaseModel):
     axis: Literal["x", "y"] = "x"
     agent: bool = False
     height_m: float | None = Field(None, gt=0)
+    detect_release: bool = True  # drop samples where the ball is still before release / after landing
 
 
 def _clean(value):
@@ -232,6 +234,11 @@ def _analyze(req: AnalyzeRequest, emit) -> None:
     except ValueError as exc:
         emit("error", {"stage": "tracking", "message": str(exc)})
         return
+    full = tr
+    rest_notes: list[str] = []
+    if req.detect_release:
+        tr, rest_notes = trim_rest(tr, calibration.px_per_m * s)
+    rest = ~np.isin(full.t, tr.t)  # dropped samples, still drawn on the video so the user sees them
     # Decoded pixels per metre: the frames were shrunk by s after the user calibrated on the source.
     data = to_track_data(tr, Calibration.from_reference(calibration.px_per_m * s, 1.0))
     box = Toolbox(data)
@@ -245,6 +252,12 @@ def _analyze(req: AnalyzeRequest, emit) -> None:
         "y_px": (tr.y / s).tolist(),
         "x_m": data.x.tolist(),
         "y_m": data.y.tolist(),
+        "notes": rest_notes,
+        "rest": {
+            "t_play": [(req.start + t) / video.time_scale for t in full.t[rest]],
+            "x_px": (full.x[rest] / s).tolist(),
+            "y_px": (full.y[rest] / s).tolist(),
+        },
     })
 
     before = _spent()
@@ -253,6 +266,7 @@ def _analyze(req: AnalyzeRequest, emit) -> None:
         question = "Measure the physics in this tracked trajectory."
         if req.height_m:
             question += f" The launch edge is {req.height_m} m above the landing surface; if this is a projectile, predict where it lands."
+        question += release_question(rest_notes)
         try:
             outcome = run_agent(make_client(), box, question,
                                 on_message=lambda m: emit("agent_message", dataclasses.asdict(m)))

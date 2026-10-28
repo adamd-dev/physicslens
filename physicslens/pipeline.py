@@ -15,6 +15,11 @@ from .track.motion import field_order, track_motion
 FITS = {"free_fall": "fit_free_fall", "projectile": "fit_projectile", "pendulum": "fit_pendulum"}
 MIN_VX = 0.1  # m/s; slower horizontal drift is camera tilt or tracking noise, not a throw
 MOTION_MAX_AREA = 2000
+# A still ball (in the hand before release, on the floor after landing) moves less than REST_RADIUS_M
+# for at least MIN_REST_S. Shorter still runs are the slow first frames of real motion.
+REST_RADIUS_M = 0.005
+MIN_REST_S = 0.03
+MIN_MOVING = 3  # fewer moving samples than this: nothing moved, leave the track for the checks to reject
 
 
 @dataclass
@@ -48,6 +53,51 @@ def track(video: Video, s: TrackSettings) -> tuple[str, Track]:
         return field_order(video, **kw)
     fields = None if s.fields == "none" else s.fields
     return s.fields, track_motion(video, fields=fields, **kw)
+
+
+def _still_run(t: np.ndarray, x: np.ndarray, y: np.ndarray, radius_px: float) -> int:
+    """Length of the leading run of samples within radius_px of the first one, if it lasts MIN_REST_S."""
+    far = np.hypot(x - x[0], y - y[0]) > radius_px
+    n = int(np.argmax(far)) if far.any() else len(t)
+    return n if n >= 2 and abs(t[n - 1] - t[0]) >= MIN_REST_S else 0
+
+
+def rest_samples(tr: Track, px_per_m: float) -> tuple[int, int]:
+    """(leading, trailing) samples where the object sits still: held before release, lying after landing.
+
+    They are not free motion. Fitting them bends the curve through a pause and biases g low.
+    """
+    if len(tr) < 2:
+        return 0, 0
+    radius = REST_RADIUS_M * px_per_m
+    lead = _still_run(tr.t, tr.x, tr.y, radius)
+    trail = _still_run(tr.t[::-1], tr.x[::-1], tr.y[::-1], radius)
+    if len(tr) - lead - trail < MIN_MOVING:
+        return 0, 0
+    return lead, trail
+
+
+def trim_rest(tr: Track, px_per_m: float) -> tuple[Track, list[str]]:
+    """Drop the still samples at both ends; the notes say what went, so nothing changes silently."""
+    lead, trail = rest_samples(tr, px_per_m)
+    if not lead and not trail:
+        return tr, []
+    notes = []
+    if lead:
+        notes.append(f"dropped {lead} samples at rest before the motion ({tr.t[lead - 1] - tr.t[0]:.2f} s, "
+                     "e.g. the ball still in the hand)")
+    if trail:
+        notes.append(f"dropped {trail} samples at rest after the motion ({tr.t[-1] - tr.t[-trail]:.2f} s, "
+                     "e.g. the ball lying on the floor)")
+    end = len(tr) - trail
+    return Track(tr.t[lead:end], tr.x[lead:end], tr.y[lead:end], tr.source), notes
+
+
+def release_question(notes: list[str]) -> str:
+    """One sentence for the agent, so its summary does not blame calibration for a pause it never saw."""
+    if not notes:
+        return ""
+    return " Samples where the ball was at rest (" + "; ".join(notes) + ") were already removed from the track."
 
 
 def to_track_data(tr: Track, calibration: Calibration) -> TrackData:
