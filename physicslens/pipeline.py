@@ -1,6 +1,7 @@
 """Video in, track and fits out: the steps shared by the CLI and the web API."""
 
 import warnings
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 import numpy as np
@@ -15,11 +16,13 @@ from .track.motion import field_order, track_motion
 FITS = {"free_fall": "fit_free_fall", "projectile": "fit_projectile", "pendulum": "fit_pendulum"}
 MIN_VX = 0.1  # m/s; slower horizontal drift is camera tilt or tracking noise, not a throw
 MOTION_MAX_AREA = 2000
-# A still ball (in the hand before release, on the floor after landing) moves less than REST_RADIUS_M
-# for at least MIN_REST_S. Shorter still runs are the slow first frames of real motion.
+# A still ball (in the hand before release, on the floor after landing) stays within the rest radius
+# for at least MIN_REST_S. The radius never drops below REST_RADIUS_PX: tracking jitter is 1-2 px, and
+# interlaced fields move a still ball half a line. Shorter still runs are the slow first frames of motion.
 REST_RADIUS_M = 0.005
-MIN_REST_S = 0.03
-MIN_MOVING = 3  # fewer moving samples than this: nothing moved, leave the track for the checks to reject
+REST_RADIUS_PX = 4.0
+MIN_REST_S = 0.08
+MIN_MOVING = 8  # fewer moving samples than this: too little left to fit honestly, keep the track as is
 
 
 @dataclass
@@ -56,10 +59,20 @@ def track(video: Video, s: TrackSettings) -> tuple[str, Track]:
 
 
 def _still_run(t: np.ndarray, x: np.ndarray, y: np.ndarray, radius_px: float) -> int:
-    """Length of the leading run of samples within radius_px of the first one, if it lasts MIN_REST_S."""
-    far = np.hypot(x - x[0], y - y[0]) > radius_px
+    """Length of the leading run of samples near where the track starts, if it lasts MIN_REST_S
+    and the object never comes back there.
+
+    The anchor is the median of the first 3 samples, so one bad first centroid cannot hide a hold.
+    NaN counts as moving: an unknown position never extends a still run.
+    """
+    ax, ay = np.median(x[:3]), np.median(y[:3])
+    far = ~(np.hypot(x - ax, y - ay) <= radius_px)
+    far[0] = False  # judged by the samples after it, through the median anchor
     n = int(np.argmax(far)) if far.any() else len(t)
-    return n if n >= 2 and abs(t[n - 1] - t[0]) >= MIN_REST_S else 0
+    if n < 2 or abs(t[n - 1] - t[0]) < MIN_REST_S:
+        return 0
+    # A held or landed ball leaves for good; a pendulum comes back to its turning point every swing.
+    return 0 if (~far[n:]).any() else n
 
 
 def rest_samples(tr: Track, px_per_m: float) -> tuple[int, int]:
@@ -67,9 +80,9 @@ def rest_samples(tr: Track, px_per_m: float) -> tuple[int, int]:
 
     They are not free motion. Fitting them bends the curve through a pause and biases g low.
     """
-    if len(tr) < 2:
+    if len(tr) < MIN_MOVING:
         return 0, 0
-    radius = REST_RADIUS_M * px_per_m
+    radius = max(REST_RADIUS_M * px_per_m, REST_RADIUS_PX)
     lead = _still_run(tr.t, tr.x, tr.y, radius)
     trail = _still_run(tr.t[::-1], tr.x[::-1], tr.y[::-1], radius)
     if len(tr) - lead - trail < MIN_MOVING:
@@ -77,23 +90,31 @@ def rest_samples(tr: Track, px_per_m: float) -> tuple[int, int]:
     return lead, trail
 
 
-def trim_rest(tr: Track, px_per_m: float) -> tuple[Track, list[str]]:
+@dataclass
+class Trim:
+    track: Track  # the samples kept for fitting, original times
+    lead: int  # still samples dropped at the start
+    trail: int  # still samples dropped at the end
+    notes: list[str]
+
+
+def trim_rest(tr: Track, px_per_m: float) -> Trim:
     """Drop the still samples at both ends; the notes say what went, so nothing changes silently."""
     lead, trail = rest_samples(tr, px_per_m)
     if not lead and not trail:
-        return tr, []
+        return Trim(tr, 0, 0, [])
     notes = []
     if lead:
-        notes.append(f"dropped {lead} samples at rest before the motion ({tr.t[lead - 1] - tr.t[0]:.2f} s, "
-                     "e.g. the ball still in the hand)")
+        notes.append(f"dropped {lead} samples at rest before the motion ({tr.t[lead - 1] - tr.t[0]:.2f} s: "
+                     "the ball held before release)")
     if trail:
-        notes.append(f"dropped {trail} samples at rest after the motion ({tr.t[-1] - tr.t[-trail]:.2f} s, "
-                     "e.g. the ball lying on the floor)")
+        notes.append(f"dropped {trail} samples at rest after the motion ({tr.t[-1] - tr.t[-trail]:.2f} s: "
+                     "the ball lying still after landing)")
     end = len(tr) - trail
-    return Track(tr.t[lead:end], tr.x[lead:end], tr.y[lead:end], tr.source), notes
+    return Trim(Track(tr.t[lead:end], tr.x[lead:end], tr.y[lead:end], tr.source), lead, trail, notes)
 
 
-def release_question(notes: list[str]) -> str:
+def release_question(notes: Sequence[str]) -> str:
     """One sentence for the agent, so its summary does not blame calibration for a pause it never saw."""
     if not notes:
         return ""
@@ -129,9 +150,12 @@ def choose(results: list[dict]) -> dict | None:
     for name in ("free_fall", "projectile", "pendulum"):
         if name in plausible:
             return plausible[name]
-    # Nothing passed: R² is scale-free, so it compares a 1 m drop with a 5 mm sideways wobble fairly.
-    # r2 is None when it was not finite.
-    return max(fitted.values(), key=lambda r: -np.inf if r["r2"] is None else r["r2"]) if fitted else None
+    # Nothing passed: fewest failed checks first, then R², which is scale-free (RMSE in mm would compare
+    # a 1 m drop with a 5 mm sideways wobble). r2 is None when it was not finite.
+    def rank(r: dict) -> tuple[int, float]:
+        return len(r["check"]["problems"]), np.inf if r["r2"] is None else -r["r2"]
+
+    return min(fitted.values(), key=rank) if fitted else None
 
 
 def fitted_xy(box: Toolbox, fit_id: str) -> dict[str, list[float]]:

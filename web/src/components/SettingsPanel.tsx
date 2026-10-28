@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { AnalyzeRequest, Settings } from "../api";
 
-export type Options = Pick<AnalyzeRequest, "start" | "end" | "capture_fps" | "model" | "axis" | "agent" | "height_m">;
+export type Options = Pick<AnalyzeRequest, "start" | "end" | "capture_fps" | "model" | "axis" | "agent" | "height_m" | "detect_release">;
 
 function Num({ label, value, onChange, step = 1, placeholder }: { label: string; value: number | null; onChange: (v: number | null) => void; step?: number; placeholder?: string }) {
   return (
@@ -60,6 +60,19 @@ export default function SettingsPanel({ settings, options, onSettings, onOptions
         <Select label="Tracker" value={settings.tracker} options={[["motion", "Motion"], ["color", "Color"]]} onChange={(tracker) => set({ tracker })} />
         <Num label="Launch height (m)" value={options.height_m} step={0.01} placeholder="cup shot" onChange={(height_m) => opt({ height_m })} />
       </div>
+
+      <label className="flex cursor-pointer items-center justify-between gap-3 text-sm text-slate-300">
+        <span>
+          Auto-detect release
+          <span className="block text-sm text-slate-400">Ignore the ball while it is still in the hand or on the floor</span>
+        </span>
+        <input
+          type="checkbox"
+          className="h-5 w-5 shrink-0 accent-cyan-400"
+          checked={options.detect_release}
+          onChange={(e) => opt({ detect_release: e.target.checked })}
+        />
+      </label>
 
       <button className="inline-flex min-h-6 items-center gap-1 rounded py-1 text-sm text-slate-400 hover:text-slate-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400" aria-expanded={open} onClick={() => setOpen(!open)}>
         <span aria-hidden="true">{open ? "▾" : "▸"}</span> Advanced

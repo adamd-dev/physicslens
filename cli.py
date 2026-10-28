@@ -13,6 +13,7 @@ import dataclasses
 import json
 import os
 import sys
+from collections.abc import Sequence
 
 import numpy as np
 
@@ -72,14 +73,14 @@ def make_client():
     return MetaClient.from_env()
 
 
-def report_agent(args, data: TrackData, box: Toolbox, video_warnings, rest_notes=()) -> int:
+def report_agent(args, data: TrackData, box: Toolbox, video_warnings: Sequence[str], rest_notes: Sequence[str] = ()) -> int:
     """Exit codes: 0 accepted and plausible, 1 accepted but flagged, 3 setup/API failure, 4 no answer."""
     for w in video_warnings:
         print(f"  warning: {w}", file=sys.stderr)
     question = "Measure the physics in this tracked trajectory."
     if args.height:
         question += f" The launch edge is {args.height} m above the landing surface; if this is a projectile, predict where it lands."
-    question += release_question(list(rest_notes))
+    question += release_question(rest_notes)
     try:
         result = run_agent(make_client(), box, question)
     except (LLMError, OSError, ValueError) as exc:
@@ -153,10 +154,11 @@ def main(argv=None) -> int:
     except ValueError as exc:
         print(f"tracking failed: {exc}", file=sys.stderr)
         return 2
-    rest_notes: list[str] = []
-    if not args.keep_rest:
-        tr, rest_notes = trim_rest(tr, calibration.px_per_m)
-    video_warnings = video_warnings + rest_notes
+    trim = None if args.keep_rest else trim_rest(tr, calibration.px_per_m)
+    rest_notes = trim.notes if trim else []
+    if trim:
+        tr = trim.track
+    video_warnings = [*video_warnings, *rest_notes]
     data = to_track_data(tr, calibration)
     box = Toolbox(data)
     if args.agent:
@@ -171,6 +173,7 @@ def main(argv=None) -> int:
         "timestamp_source": video.timestamp_source,
         "fields": fields,
         "tracked_samples": len(tr),
+        "rest_dropped": {"start": trim.lead if trim else 0, "end": trim.trail if trim else 0},
         "px_per_m": round(calibration.px_per_m, 2),
         "warnings": video_warnings,
         "fits": results,

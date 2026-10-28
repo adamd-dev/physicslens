@@ -66,3 +66,17 @@ def test_choose_falls_back_to_best_r2_not_smallest_rmse():
         {"name": "projectile", "fit_id": "fit_3", "r2": None, "rmse_m": 0.0001, "check": flagged},
     ]
     assert choose(results)["name"] == "free_fall"
+
+
+def test_choose_prefers_fewest_failed_checks():
+    # BallTossOut: a pendulum with a 63 s period fits the straight x motion with R² 0.99999,
+    # but fails four checks; the projectile fails only the runs test (perspective).
+    results = [
+        {"name": "free_fall", "fit_id": "fit_1", "r2": 0.99997, "rmse_m": 0.00135,
+         "check": {"ok": False, "problems": ["runs", "sideways"]}},
+        {"name": "projectile", "fit_id": "fit_2", "r2": 0.99993, "rmse_m": 0.00257,
+         "check": {"ok": False, "problems": ["runs"]}},
+        {"name": "pendulum", "fit_id": "fit_3", "r2": 0.99999, "rmse_m": 0.0012,
+         "check": {"ok": False, "problems": ["runs", "cycles", "extrapolated", "length"]}},
+    ]
+    assert choose(results)["name"] == "projectile"

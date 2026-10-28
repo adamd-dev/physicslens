@@ -40,6 +40,7 @@ export interface AnalyzeRequest {
   axis: "x" | "y";
   agent: boolean;
   height_m: number | null;
+  detect_release: boolean;
 }
 
 export interface TrackEvent {
@@ -51,6 +52,8 @@ export interface TrackEvent {
   y_px: number[];
   x_m: number[];
   y_m: number[];
+  notes: string[];
+  rest: { t_play: number[]; x_px: number[]; y_px: number[] }; // still samples dropped before fitting
 }
 
 export interface Check {

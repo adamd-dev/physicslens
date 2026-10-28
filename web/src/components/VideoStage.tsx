@@ -115,6 +115,14 @@ export default function VideoStage({ info, mode, points, lengthM, roi, track, re
       }
 
       if (s.track) {
+        // Still samples dropped before fitting (ball in the hand, on the floor): shown, not used.
+        const r = s.track.rest ?? { t_play: [], x_px: [], y_px: [] };
+        ctx.fillStyle = "rgba(148,163,184,0.7)";
+        for (let i = 0; i < r.t_play.length; i++) {
+          ctx.beginPath();
+          ctx.arc(r.x_px[i] * k, r.y_px[i] * k, 2.6, 0, 2 * Math.PI);
+          ctx.fill();
+        }
         const t = s.track;
         let current = -1;
         for (let i = 0; i < t.t_play.length; i++) {

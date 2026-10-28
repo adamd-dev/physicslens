@@ -236,9 +236,12 @@ def _analyze(req: AnalyzeRequest, emit) -> None:
         return
     full = tr
     rest_notes: list[str] = []
+    rest = np.zeros(len(full), bool)  # dropped samples, still drawn on the video so the user sees them
     if req.detect_release:
-        tr, rest_notes = trim_rest(tr, calibration.px_per_m * s)
-    rest = ~np.isin(full.t, tr.t)  # dropped samples, still drawn on the video so the user sees them
+        trim = trim_rest(tr, calibration.px_per_m * s)
+        tr, rest_notes = trim.track, trim.notes
+        rest[:trim.lead] = True
+        rest[len(full) - trim.trail:] = True
     # Decoded pixels per metre: the frames were shrunk by s after the user calibrated on the source.
     data = to_track_data(tr, Calibration.from_reference(calibration.px_per_m * s, 1.0))
     box = Toolbox(data)

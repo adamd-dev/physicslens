@@ -19,7 +19,7 @@ const DEFAULT_SETTINGS: Settings = {
   max_area: null,
   max_jump: null,
 };
-const DEFAULT_OPTIONS: Options = { start: 0, end: null, capture_fps: null, model: "auto", axis: "x", agent: true, height_m: null };
+const DEFAULT_OPTIONS: Options = { start: 0, end: null, capture_fps: null, model: "auto", axis: "x", agent: true, height_m: null, detect_release: true };
 const STAGES: Record<string, string> = { loading: "Loading frames", tracking: "Tracking the ball", fitting: "Fitting models", agent: "Muse is reasoning" };
 
 export default function App() {
@@ -78,6 +78,7 @@ export default function App() {
         break;
       case "track":
         setTrack(e.data);
+        setWarnings((w) => [...w, ...(e.data.notes ?? [])]);
         break;
       case "agent_message":
         setMessages((m) => [...m, e.data]);
@@ -194,8 +195,8 @@ export default function App() {
             </div>
 
             {error && <div role="alert" className="rise rounded-xl border border-rose-500/40 bg-rose-500/10 p-4 text-sm text-rose-200">{error}</div>}
-            {warnings.map((w) => (
-              <div key={w} className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-3 text-sm text-amber-200">
+            {warnings.map((w, i) => (
+              <div key={`${i}-${w}`} className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-3 text-sm text-amber-200">
                 {w}
               </div>
             ))}
