@@ -1,0 +1,323 @@
+"""Local web API for the PhysicsLens UI: upload a video, analyze it, stream the agent live.
+
+Binds to 127.0.0.1 only. The Meta key stays inside MetaClient: the browser sees
+tool calls and results, never the key. Run with `physicslens-ui`.
+"""
+
+import csv
+import dataclasses
+import json
+import math
+import os
+import queue
+import re
+import threading
+import uuid
+from pathlib import Path
+from typing import Literal
+
+import cv2
+from fastapi import FastAPI, HTTPException, UploadFile
+from fastapi.responses import FileResponse, Response, StreamingResponse
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, Field
+
+from .agent.loop import run_agent
+from .agent.tools import Toolbox
+from .calibrate import Calibration
+from .llm.meta_client import PROJECT_ROOT, LLMError, MetaClient
+from .physics import models
+from .pipeline import TrackSettings, choose, fitted_xy, load, run_fits, to_track_data, track
+
+UPLOADS = PROJECT_ROOT / "cache" / "uploads"
+WEB_DIST = PROJECT_ROOT / "web" / "dist"
+COSTS = PROJECT_ROOT / "costs.csv"
+MAX_UPLOAD_BYTES = 500 * 1024 * 1024
+MAX_WIDTH = 960  # frames are shrunk to this on load; a 1080p60 clip is ~6 MB per frame otherwise
+VIDEO_TYPES = {".mp4": "video/mp4", ".m4v": "video/mp4", ".mov": "video/quicktime", ".webm": "video/webm",
+               ".avi": "video/x-msvideo", ".mkv": "video/x-matroska"}
+_ID = re.compile(r"[0-9a-f]{32}")
+
+app = FastAPI(title="PhysicsLens")
+_busy = threading.Lock()  # one analysis at a time: frames are memory-heavy and the budget is shared
+
+
+def make_client():
+    """The runtime model; tests swap this for a scripted MockClient."""
+    return MetaClient.from_env()
+
+
+def _video_path(video_id: str) -> Path:
+    # The id is generated here on upload; anything else is refused before touching the filesystem.
+    if not _ID.fullmatch(video_id):
+        raise HTTPException(404, "unknown video")
+    matches = [p for p in UPLOADS.glob(f"{video_id}.*") if p.suffix in VIDEO_TYPES]
+    if not matches:
+        raise HTTPException(404, "unknown video")
+    return matches[0]
+
+
+def _probe(path: Path) -> dict | None:
+    cap = cv2.VideoCapture(str(path))
+    try:
+        if not cap.isOpened():
+            return None
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        width, height = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    finally:
+        cap.release()
+    if not width or not height:
+        return None
+    return {"fps": fps, "frames": frames, "width": width, "height": height,
+            "duration_s": frames / fps if fps > 0 else None}
+
+
+@app.post("/api/videos")
+async def upload_video(file: UploadFile) -> dict:
+    ext = Path(file.filename or "").suffix.lower()
+    if ext not in VIDEO_TYPES:
+        raise HTTPException(415, f"unsupported video type {ext or '(none)'}; use {', '.join(sorted(VIDEO_TYPES))}")
+    UPLOADS.mkdir(parents=True, exist_ok=True)
+    video_id = uuid.uuid4().hex
+    dest = UPLOADS / f"{video_id}{ext}"
+    size = 0
+    with dest.open("wb") as out:
+        while chunk := await file.read(1 << 20):
+            size += len(chunk)
+            if size > MAX_UPLOAD_BYTES:
+                out.close()
+                dest.unlink(missing_ok=True)
+                raise HTTPException(413, f"video larger than {MAX_UPLOAD_BYTES // (1024 * 1024)} MB")
+            out.write(chunk)
+    info = _probe(dest)
+    if info is None:
+        dest.unlink(missing_ok=True)
+        raise HTTPException(415, "OpenCV cannot decode this video")
+    return {"video_id": video_id, "name": file.filename, **info}
+
+
+@app.get("/api/videos/{video_id}/file")
+def video_file(video_id: str) -> FileResponse:
+    path = _video_path(video_id)
+    return FileResponse(path, media_type=VIDEO_TYPES[path.suffix])
+
+
+@app.get("/api/videos/{video_id}/frame")
+def video_frame(video_id: str, t: float = 0.0) -> Response:
+    cap = cv2.VideoCapture(str(_video_path(video_id)))
+    try:
+        cap.set(cv2.CAP_PROP_POS_MSEC, max(t, 0.0) * 1000)
+        ok, frame = cap.read()
+    finally:
+        cap.release()
+    if not ok:
+        raise HTTPException(416, f"no frame at {t} s")
+    return Response(cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 90])[1].tobytes(), media_type="image/jpeg")
+
+
+class Scale(BaseModel):
+    """Either px_per_m, or two points on a reference object (source pixels) and its length."""
+
+    px_per_m: float | None = Field(None, gt=0)
+    p1: tuple[float, float] | None = None
+    p2: tuple[float, float] | None = None
+    length_m: float | None = Field(None, gt=0)
+
+    def calibration(self) -> Calibration:
+        if self.px_per_m:
+            return Calibration.from_reference(self.px_per_m, 1.0)
+        if self.p1 and self.p2 and self.length_m:
+            return Calibration.from_points(self.p1, self.p2, self.length_m)
+        raise ValueError("scale needs px_per_m, or p1, p2 and length_m")
+
+
+class Settings(BaseModel):
+    """Tracking settings in source pixels, as the user sees the video."""
+
+    tracker: Literal["motion", "color"] = "motion"
+    hsv_lower: tuple[int, int, int] = (0, 0, 200)
+    hsv_upper: tuple[int, int, int] = (180, 60, 255)
+    fields: Literal["none", "auto", "top", "bottom"] = "none"
+    roi: tuple[int, int, int, int] | None = None
+    min_area: int = Field(10, ge=1)
+    max_area: int | None = Field(None, ge=1)
+    max_jump: float | None = Field(None, gt=0)
+
+    def scaled(self, s: float) -> TrackSettings:
+        """The same settings in decoded pixels, after the frames were shrunk by `s`."""
+        return TrackSettings(
+            self.tracker, self.hsv_lower, self.hsv_upper, self.fields,
+            tuple(round(v * s) for v in self.roi) if self.roi else None,
+            max(1, round(self.min_area * s * s)),
+            max(1, round(self.max_area * s * s)) if self.max_area else None,
+            self.max_jump * s if self.max_jump else None,
+        )
+
+
+class AnalyzeRequest(BaseModel):
+    video_id: str
+    scale: Scale
+    settings: Settings = Settings()
+    start: float = Field(0.0, ge=0)
+    end: float | None = Field(None, gt=0)
+    capture_fps: float | None = Field(None, gt=0)
+    model: Literal["auto", "free_fall", "projectile", "pendulum"] = "auto"
+    axis: Literal["x", "y"] = "x"
+    agent: bool = False
+    height_m: float | None = Field(None, gt=0)
+
+
+def _clean(value):
+    """JSON-safe: NaN and inf become null, numpy scalars become floats."""
+    if isinstance(value, dict):
+        return {k: _clean(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_clean(v) for v in value]
+    if hasattr(value, "item"):
+        value = value.item()
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
+    return value
+
+
+def _spent() -> float:
+    if not COSTS.is_file():
+        return 0.0
+    with COSTS.open(newline="") as f:
+        return sum(float(row["cost_usd"]) for row in csv.DictReader(f))
+
+
+def _result(box: Toolbox, fit_id: str, px_per_m: float, t_offset: float, time_scale: float, check: dict) -> dict:
+    fit = box.fits[fit_id]
+    curve = fitted_xy(box, fit_id)
+    _, model, axis, _ = box.windows[fit_id]
+    result = {
+        "fit_id": fit_id,
+        "model": model,
+        "axis": axis,
+        "params": fit.params,
+        "stderr": fit.stderr,
+        "r2": fit.r2,
+        "rmse_m": fit.rmse,
+        "check": check,
+        "curve": {
+            "t_play": [(t_offset + t) / time_scale for t in curve["t"]],
+            "x_px": [x * px_per_m for x in curve["x"]],
+            "y_px": [y * px_per_m for y in curve["y"]],
+        },
+    }
+    if model == "pendulum":
+        result["length_m"] = models.pendulum_length(fit.params["omega"], fit.params["gamma"])
+        result["period_s"] = 2 * math.pi / fit.params["omega"]
+    return result
+
+
+def _analyze(req: AnalyzeRequest, emit) -> None:
+    path = _video_path(req.video_id)
+    emit("status", {"stage": "loading"})
+    try:
+        calibration = req.scale.calibration()
+        video, video_warnings = load(str(path), req.start, req.end, req.capture_fps, MAX_WIDTH)
+    except (ValueError, FileNotFoundError) as exc:
+        emit("error", {"stage": "loading", "message": str(exc)})
+        return
+    s = video.scale
+    emit("video", {"frames": len(video.frames), "fps": video.fps, "timestamp_source": video.timestamp_source,
+                   "scale": s, "warnings": video_warnings})
+
+    emit("status", {"stage": "tracking"})
+    try:
+        fields, tr = track(video, req.settings.scaled(s))
+    except ValueError as exc:
+        emit("error", {"stage": "tracking", "message": str(exc)})
+        return
+    # Decoded pixels per metre: the frames were shrunk by s after the user calibrated on the source.
+    data = to_track_data(tr, Calibration.from_reference(calibration.px_per_m * s, 1.0))
+    box = Toolbox(data)
+    t_offset = req.start + float(tr.t[0])  # real seconds from the clip start to the first sample
+    emit("track", {
+        "fields": fields,
+        "px_per_m": calibration.px_per_m,
+        "t": data.t.tolist(),
+        "t_play": [(req.start + t) / video.time_scale for t in tr.t],
+        "x_px": (tr.x / s).tolist(),
+        "y_px": (tr.y / s).tolist(),
+        "x_m": data.x.tolist(),
+        "y_m": data.y.tolist(),
+    })
+
+    before = _spent()
+    if req.agent:
+        emit("status", {"stage": "agent"})
+        question = "Measure the physics in this tracked trajectory."
+        if req.height_m:
+            question += f" The launch edge is {req.height_m} m above the landing surface; if this is a projectile, predict where it lands."
+        try:
+            outcome = run_agent(make_client(), box, question,
+                                on_message=lambda m: emit("agent_message", dataclasses.asdict(m)))
+        except (LLMError, OSError, ValueError) as exc:
+            emit("error", {"stage": "agent", "message": str(exc)})
+            return
+        finally:
+            emit("cost", {"run_usd": _spent() - before, "total_usd": _spent()})
+        if outcome.fit_id is None:
+            emit("error", {"stage": "agent", "message": outcome.summary, "steps": outcome.steps})
+            return
+        fit_id, check = outcome.fit_id, outcome.check
+        extra = {"summary": outcome.summary, "steps": outcome.steps, "source": "agent"}
+    else:
+        emit("status", {"stage": "fitting"})
+        results = run_fits(box, req.model, req.axis)
+        best = choose(results)
+        emit("fits", {"fits": results})
+        if best is None:
+            emit("error", {"stage": "fitting", "message": "no model could be fitted"})
+            return
+        fit_id, check = best["fit_id"], best["check"]
+        extra = {"source": "deterministic"}
+
+    result = {**_result(box, fit_id, calibration.px_per_m, t_offset, video.time_scale, check), **extra}
+    if req.height_m and result["model"] == "projectile":
+        result["landing"] = box.call("predict_landing", {"fit_id": fit_id, "height_m": req.height_m})
+    emit("result", result)
+
+
+def _event(name: str, data) -> str:
+    return f"event: {name}\ndata: {json.dumps(_clean(data), allow_nan=False)}\n\n"
+
+
+@app.post("/api/analyze")
+def analyze(req: AnalyzeRequest) -> StreamingResponse:
+    _video_path(req.video_id)  # 404 before the stream starts
+    if not _busy.acquire(blocking=False):
+        raise HTTPException(409, "an analysis is already running")
+    events: queue.Queue[str | None] = queue.Queue()
+
+    def work() -> None:
+        try:
+            _analyze(req, lambda name, data: events.put(_event(name, data)))
+        except Exception as exc:  # the stream must end with an error event, never hang the UI
+            events.put(_event("error", {"stage": "internal", "message": f"{type(exc).__name__}: {exc}"}))
+        finally:
+            events.put(_event("done", {}))
+            events.put(None)
+            _busy.release()
+
+    threading.Thread(target=work, daemon=True).start()
+
+    def stream():
+        while (item := events.get()) is not None:
+            yield item
+
+    return StreamingResponse(stream(), media_type="text/event-stream", headers={"Cache-Control": "no-cache"})
+
+
+if WEB_DIST.is_dir():
+    app.mount("/", StaticFiles(directory=WEB_DIST, html=True), name="web")
+
+
+def main() -> None:
+    import uvicorn
+
+    uvicorn.run(app, host="127.0.0.1", port=int(os.environ.get("PHYSICSLENS_PORT", "8000")))

@@ -1,0 +1,115 @@
+"""Web API end to end on a synthetic drop: upload, analyze, stream events."""
+
+import json
+
+import pytest
+from fastapi.testclient import TestClient
+
+from physicslens import server
+from physicslens.llm.base import MockClient, Reply
+from physicslens.physics import models
+from tests.test_robustness import PX_PER_M, write_drop
+
+SETTINGS = {"tracker": "color"}
+
+
+@pytest.fixture
+def client(tmp_path, monkeypatch):
+    monkeypatch.setattr(server, "UPLOADS", tmp_path / "uploads")
+    monkeypatch.setattr(server, "COSTS", tmp_path / "costs.csv")
+    return TestClient(server.app)
+
+
+def upload_drop(client, tmp_path) -> str:
+    path = tmp_path / "drop.avi"
+    write_drop(path, capture_fps=60, playback_fps=60, n_frames=27)
+    with path.open("rb") as f:
+        response = client.post("/api/videos", files={"file": ("drop.avi", f, "video/x-msvideo")})
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert (body["width"], body["height"], body["frames"]) == (640, 480, 27)
+    return body["video_id"]
+
+
+def events(response) -> list[tuple[str, dict]]:
+    out = []
+    for block in response.text.strip().split("\n\n"):
+        lines = dict(line.split(": ", 1) for line in block.splitlines())
+        out.append((lines["event"], json.loads(lines["data"])))
+    return out
+
+
+def analyze(client, video_id, **extra):
+    body = {"video_id": video_id, "scale": {"px_per_m": PX_PER_M}, "settings": SETTINGS, **extra}
+    response = client.post("/api/analyze", json=body)
+    assert response.status_code == 200, response.text
+    return events(response)
+
+
+def test_analyze_streams_track_fits_and_result(client, tmp_path):
+    stream = analyze(client, upload_drop(client, tmp_path))
+    names = [name for name, _ in stream]
+    assert [n for n in names if n != "status"] == ["video", "track", "fits", "result", "done"]
+    track = dict(stream)["track"]
+    assert track["x_px"][0] == pytest.approx(320, abs=1)  # source pixels, for the overlay
+    result = dict(stream)["result"]
+    assert result["model"] == "free_fall" and result["source"] == "deterministic"
+    assert result["params"]["g"] == pytest.approx(models.G, rel=0.02)
+    assert len(result["curve"]["t_play"]) == len(result["curve"]["y_px"]) == len(track["t"])
+
+
+def test_calibration_from_two_points(client, tmp_path):
+    scale = {"p1": [0, 0], "p2": [0, PX_PER_M], "length_m": 1.0}
+    response = client.post("/api/analyze", json={"video_id": upload_drop(client, tmp_path), "scale": scale, "settings": SETTINGS})
+    assert dict(events(response))["result"]["params"]["g"] == pytest.approx(models.G, rel=0.02)
+
+
+def call(i, name, **arguments):
+    return {"id": f"c{i}", "name": name, "arguments": json.dumps(arguments)}
+
+
+def test_agent_messages_stream_live(client, tmp_path, monkeypatch):
+    scripted = MockClient([
+        Reply("Looks like a drop.", [call(1, "fit_free_fall")]),
+        Reply("", [call(2, "final_answer", fit_id="fit_1", summary="g is about 9.8")]),
+    ])
+    monkeypatch.setattr(server, "make_client", lambda: scripted)
+    stream = analyze(client, upload_drop(client, tmp_path), agent=True)
+    roles = [data["role"] for name, data in stream if name == "agent_message"]
+    assert roles == ["system", "user", "assistant", "tool", "assistant", "tool"]
+    result = dict(stream)["result"]
+    assert result["source"] == "agent" and result["summary"] == "g is about 9.8" and result["steps"] == 2
+    assert dict(stream)["cost"]["run_usd"] == 0
+
+
+def test_agent_without_answer_ends_with_error(client, tmp_path, monkeypatch):
+    monkeypatch.setattr(server, "make_client", lambda: MockClient([Reply("thinking")] * 12))
+    stream = analyze(client, upload_drop(client, tmp_path), agent=True)
+    assert dict(stream)["error"]["stage"] == "agent"
+    assert stream[-1][0] == "done"
+
+
+def test_tracking_failure_is_an_error_event(client, tmp_path):
+    stream = analyze(client, upload_drop(client, tmp_path), settings={"tracker": "color", "hsv_lower": [0, 200, 0], "hsv_upper": [10, 255, 50]})
+    assert dict(stream)["error"]["stage"] == "tracking"
+
+
+@pytest.mark.parametrize("video_id", ["0" * 32, "../../etc/passwd", "abc"])
+def test_unknown_or_malicious_ids_are_404(client, video_id):
+    assert client.get(f"/api/videos/{video_id}/frame").status_code == 404
+    body = {"video_id": video_id, "scale": {"px_per_m": 100}}
+    assert client.post("/api/analyze", json=body).status_code == 404
+
+
+def test_upload_rejects_wrong_type_and_oversize(client, tmp_path, monkeypatch):
+    assert client.post("/api/videos", files={"file": ("notes.txt", b"hello", "text/plain")}).status_code == 415
+    assert client.post("/api/videos", files={"file": ("fake.mp4", b"not a video", "video/mp4")}).status_code == 415
+    monkeypatch.setattr(server, "MAX_UPLOAD_BYTES", 10)
+    assert client.post("/api/videos", files={"file": ("big.mp4", b"x" * 100, "video/mp4")}).status_code == 413
+    assert not any((tmp_path / "uploads").iterdir())  # rejected files are not kept
+
+
+def test_frame_endpoint_returns_jpeg(client, tmp_path):
+    response = client.get(f"/api/videos/{upload_drop(client, tmp_path)}/frame", params={"t": 0.1})
+    assert response.status_code == 200 and response.headers["content-type"] == "image/jpeg"
+    assert response.content[:2] == b"\xff\xd8"
