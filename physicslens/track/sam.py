@@ -91,11 +91,13 @@ def pick_object(frames: dict[int, dict[int, Box]], roi=None, prompt_box=None) ->
     With a text prompt: objects that move beat still ones (a ball lying in the background is seen
     in every frame but never moves), then the one seen in the most frames inside the search area.
     """
-    if prompt_box is not None and frames:
+    if prompt_box is not None:
+        if not frames:
+            return None
         first = frames[min(frames)]
         best = max(first, key=lambda oid: _iou(first[oid], prompt_box))
-        if _iou(first[best], prompt_box) > 0:
-            return best
+        # Nothing where the user boxed: say so rather than follow some other object.
+        return best if _iou(first[best], prompt_box) > 0 else None
     paths: dict[int, list[tuple[float, float]]] = {}
     for objects in frames.values():
         for oid, b in objects.items():

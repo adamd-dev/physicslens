@@ -1,4 +1,4 @@
-import { lazy, Suspense, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import type { AgentMessage, Point, Result, Settings, StreamEvent, TrackEvent, VideoInfo } from "./api";
 import { analyze, uploadVideo } from "./api";
 import AgentTimeline from "./components/AgentTimeline";
@@ -122,6 +122,11 @@ export default function App() {
 
   const calibrated = points.length === 2;
   const sam = settings.tracker === "sam";
+  useEffect(() => {
+    if (!sam && mode === "ball") setMode("view");
+  }, [sam, mode]);
+  // The box belongs to the first analysed frame: a new start time makes it point at the wrong place.
+  useEffect(() => setBallBox(null), [options.start]);
   const pxPerM = calibrated ? Math.hypot(points[1][0] - points[0][0], points[1][1] - points[0][1]) / lengthM : null;
 
   return (

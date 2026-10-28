@@ -93,6 +93,11 @@ def test_pick_with_a_box_follows_the_boxed_object():
     assert pick_object(frames, prompt_box=(198, 0, 212, 12)) == 5
 
 
+def test_pick_with_a_box_and_nothing_under_it_is_none():
+    frames = {n: {3: (400, 10 * n, 410, 10 * n + 10)} for n in range(10)}
+    assert pick_object(frames, prompt_box=(0, 0, 20, 20)) is None
+
+
 def test_pick_with_nothing_inside_the_area_is_none():
     assert pick_object({0: {1: (0, 0, 10, 10)}}, roi=(300, 300, 400, 400)) is None
 

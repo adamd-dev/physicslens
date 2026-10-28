@@ -172,7 +172,9 @@ export default function VideoStage({ info, mode, points, lengthM, roi, ballBox, 
   const toSource = (e: React.PointerEvent<HTMLCanvasElement>): Point => {
     const rect = e.currentTarget.getBoundingClientRect();
     const k = info.width / rect.width;
-    return [Math.round((e.clientX - rect.left) * k), Math.round((e.clientY - rect.top) * k)];
+    // Pointer capture keeps reporting past the video edge: clamp, a box may not leave the frame.
+    const clamp = (v: number, max: number) => Math.min(Math.max(Math.round(v), 0), max);
+    return [clamp((e.clientX - rect.left) * k, info.width), clamp((e.clientY - rect.top) * k, info.height)];
   };
 
   const onPointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
