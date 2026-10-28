@@ -6,6 +6,7 @@ explains why it is still acceptable, so a wrong number never leaves silently.
 """
 
 import json
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from ..llm.base import LLMClient, Message
@@ -81,17 +82,29 @@ def _finish(box: Toolbox, args: dict) -> tuple[dict, bool]:
     return check, True
 
 
-def run_agent(client: LLMClient, box: Toolbox, question: str | None = None, max_steps: int = 12) -> AgentResult:
-    messages = [
-        Message("system", SYSTEM_PROMPT),
-        Message("user", question or "Measure the physics in this tracked trajectory."),
-    ]
+def run_agent(
+    client: LLMClient,
+    box: Toolbox,
+    question: str | None = None,
+    max_steps: int = 12,
+    on_message: Callable[[Message], None] | None = None,
+) -> AgentResult:
+    """`on_message` sees every message as it is added, so a UI can stream the reasoning live."""
+    messages: list[Message] = []
+
+    def add(message: Message) -> None:
+        messages.append(message)
+        if on_message:
+            on_message(message)
+
+    add(Message("system", SYSTEM_PROMPT))
+    add(Message("user", question or "Measure the physics in this tracked trajectory."))
     tools = TOOL_SCHEMAS + [FINAL_ANSWER]
     for step in range(1, max_steps + 1):
         reply = client.chat(messages, tools)
-        messages.append(Message("assistant", reply.content, tool_calls=reply.tool_calls))
+        add(Message("assistant", reply.content, tool_calls=reply.tool_calls))
         if not reply.tool_calls:
-            messages.append(Message("user", "Continue with tool calls; finish with final_answer."))
+            add(Message("user", "Continue with tool calls; finish with final_answer."))
             continue
         for call in reply.tool_calls:
             try:
@@ -104,9 +117,9 @@ def run_agent(client: LLMClient, box: Toolbox, question: str | None = None, max_
                 if call.get("name") == "final_answer":
                     result, done = _finish(box, args)
                     if done:
-                        messages.append(Message("tool", _dump(result), tool_call_id=call.get("id")))
+                        add(Message("tool", _dump(result), tool_call_id=call.get("id")))
                         return AgentResult(args["fit_id"], str(args.get("summary", "")), result, step, messages)
                 else:
                     result = box.call(call.get("name"), args)
-            messages.append(Message("tool", _dump(result), tool_call_id=call.get("id")))
+            add(Message("tool", _dump(result), tool_call_id=call.get("id")))
     return AgentResult(None, f"stopped after {max_steps} steps without an accepted answer", None, max_steps, messages)

@@ -13,20 +13,15 @@ import dataclasses
 import json
 import os
 import sys
-import warnings
 
 import numpy as np
 
 from physicslens.agent.loop import run_agent
 from physicslens.agent.tools import Toolbox, TrackData
 from physicslens.calibrate import Calibration
-from physicslens.ingest import load_video
 from physicslens.llm.meta_client import LLMError, MetaClient
 from physicslens.physics import models
-from physicslens.track.color import track_color
-from physicslens.track.motion import field_order, track_motion
-
-FITS = {"free_fall": "fit_free_fall", "projectile": "fit_projectile", "pendulum": "fit_pendulum"}
+from physicslens.pipeline import FITS, TrackSettings, choose, load, run_fits, to_track_data, track
 
 
 def _numbers(text: str, n: int, cast=float):
@@ -78,7 +73,7 @@ def make_client():
 def report_agent(args, data: TrackData, box: Toolbox, video_warnings) -> int:
     """Exit codes: 0 accepted and plausible, 1 accepted but flagged, 3 setup/API failure, 4 no answer."""
     for w in video_warnings:
-        print(f"  warning: {w.message}", file=sys.stderr)
+        print(f"  warning: {w}", file=sys.stderr)
     question = "Measure the physics in this tracked trajectory."
     if args.height:
         question += f" The launch edge is {args.height} m above the landing surface; if this is a projectile, predict where it lands."
@@ -113,46 +108,10 @@ def report_agent(args, data: TrackData, box: Toolbox, video_warnings) -> int:
     return 0 if result.check["ok"] else 1
 
 
-def track(args, video):
-    if args.tracker == "color":
-        return "none", track_color(
-            video, args.hsv_lower, args.hsv_upper, args.min_area, args.max_jump, max_area=args.max_area, roi=args.roi
-        )
-    kw = dict(min_area=args.min_area, max_area=args.max_area or 2000, max_jump_px=args.max_jump, roi=args.roi)
-    if args.fields == "auto":
-        return field_order(video, **kw)
-    fields = None if args.fields == "none" else args.fields
-    return args.fields, track_motion(video, fields=fields, **kw)
-
-
-def run_fits(box: Toolbox, args) -> list[dict]:
-    names = list(FITS) if args.model == "auto" else [args.model]
-    results = []
-    for name in names:
-        kwargs = {"axis": args.axis} if name == "pendulum" else {}
-        summary = box.call(FITS[name], kwargs)
-        if "error" not in summary:
-            summary["check"] = box.check_plausibility(summary["fit_id"])
-        results.append({"name": name, **summary})
-    return results
-
-
-MIN_VX = 0.1  # m/s; slower horizontal drift is camera tilt or tracking noise, not a throw
-
-
-def choose(results: list[dict]) -> dict | None:
-    """Prefer the simplest plausible model; RMSE across different models is not comparable."""
-    fitted = {r["name"]: r for r in results if "error" not in r}
-    plausible = {name: r for name, r in fitted.items() if r["check"]["ok"]}
-    projectile = plausible.get("projectile")
-    if projectile:
-        vx, sx = projectile["params"]["vx"], projectile["stderr"]["vx"]
-        if abs(vx) > MIN_VX and abs(vx) > 3 * sx:
-            return projectile
-    for name in ("free_fall", "projectile", "pendulum"):
-        if name in plausible:
-            return plausible[name]
-    return min(fitted.values(), key=lambda r: r["rmse_m"]) if fitted else None
+def settings(args) -> TrackSettings:
+    return TrackSettings(
+        args.tracker, args.hsv_lower, args.hsv_upper, args.fields, args.roi, args.min_area, args.max_area, args.max_jump
+    )
 
 
 def plot(path, data: TrackData, box: Toolbox, best: dict, axis: str):
@@ -179,23 +138,20 @@ def plot(path, data: TrackData, box: Toolbox, best: dict, axis: str):
 
 def main(argv=None) -> int:
     args = parse_args(argv)
-    with warnings.catch_warnings(record=True) as caught:
-        warnings.simplefilter("always")
-        video = load_video(args.video, args.start, args.end, args.capture_fps)
+    video, video_warnings = load(args.video, args.start, args.end, args.capture_fps)
     calibration = Calibration.from_reference(args.px_per_m, 1.0) if args.px_per_m else Calibration.from_points(
         args.ref[:2], args.ref[2:4], args.ref[4]
     )
     try:
-        fields, tr = track(args, video)
+        fields, tr = track(video, settings(args))
     except ValueError as exc:
         print(f"tracking failed: {exc}", file=sys.stderr)
         return 2
-    # Shift time to the first tracked sample so the toolbox window covers the whole track.
-    data = TrackData(tr.t - tr.t[0], calibration.to_meters(tr.x), calibration.to_meters(tr.y))
+    data = to_track_data(tr, calibration)
     box = Toolbox(data)
     if args.agent:
-        return report_agent(args, data, box, caught)
-    results = run_fits(box, args)
+        return report_agent(args, data, box, video_warnings)
+    results = run_fits(box, args.model, args.axis)
     best = choose(results)
 
     report = {
@@ -206,7 +162,7 @@ def main(argv=None) -> int:
         "fields": fields,
         "tracked_samples": len(tr),
         "px_per_m": round(calibration.px_per_m, 2),
-        "warnings": [str(w.message) for w in caught],
+        "warnings": video_warnings,
         "fits": results,
         "best": best["fit_id"] if best else None,
     }

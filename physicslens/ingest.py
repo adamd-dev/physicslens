@@ -27,6 +27,7 @@ class Video:
     height: int
     timestamp_source: str  # "container" or "index"
     time_scale: float  # real seconds per playback second
+    scale: float = 1.0  # decoded pixels per source pixel (< 1 when max_width shrank the frames)
 
 
 def _repair(ts: np.ndarray) -> np.ndarray | None:
@@ -41,9 +42,16 @@ def _repair(ts: np.ndarray) -> np.ndarray | None:
 
 
 def load_video(
-    path: str, start_s: float = 0.0, end_s: float | None = None, capture_fps: float | None = None
+    path: str,
+    start_s: float = 0.0,
+    end_s: float | None = None,
+    capture_fps: float | None = None,
+    max_width: int | None = None,
 ) -> Video:
-    """Load frames in the half-open real-time window [start_s, end_s)."""
+    """Load frames in the half-open real-time window [start_s, end_s).
+
+    `max_width` shrinks wider frames on load: a 1080p60 phone clip is ~6 MB per frame in memory.
+    """
     cap = cv2.VideoCapture(path)
     if not cap.isOpened():
         raise FileNotFoundError(f"cannot open video: {path}")
@@ -51,6 +59,8 @@ def load_video(
     if not math.isfinite(playback_fps) or playback_fps <= 0:
         playback_fps = 30.0
     time_scale = playback_fps / capture_fps if capture_fps else 1.0
+    source_width = cap.get(cv2.CAP_PROP_FRAME_WIDTH)
+    scale = max_width / source_width if max_width and source_width > max_width else 1.0
 
     frames, container_ts, index_ts = [], [], []
     i = 0
@@ -66,6 +76,8 @@ def load_video(
             continue
         if end_s is not None and t_index >= end_s:
             break
+        if scale != 1.0:
+            frame = cv2.resize(frame, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
         frames.append(frame)
         container_ts.append(t_container)
         index_ts.append(t_index)
@@ -88,4 +100,4 @@ def load_video(
             warnings.warn("container timestamps unusable; falling back to index / fps")
 
     height, width = frames[0].shape[:2]  # decoded shape, which already reflects rotation
-    return Video(frames, timestamps - timestamps[0], 1.0 / expected_dt, width, height, source, time_scale)
+    return Video(frames, timestamps - timestamps[0], 1.0 / expected_dt, width, height, source, time_scale, scale)
