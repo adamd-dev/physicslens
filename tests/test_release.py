@@ -85,7 +85,7 @@ def test_bounce_back_to_the_rest_spot_is_not_a_landing():
 
 
 def test_ball_lying_still_after_landing_is_trimmed():
-    tr, n_hold, n_rest = held_drop(hold_s=0, rest_after_s=0.3)
+    tr, _, n_rest = held_drop(hold_s=0, rest_after_s=0.3)
     lead, trail = rest_samples(tr, PX_PER_M)
     assert lead == 0
     assert n_rest <= trail <= n_rest + 1
@@ -144,7 +144,7 @@ def test_tiny_tracks_are_left_alone(n):
 
 
 def test_nan_ends_a_still_run():
-    tr, n_hold, _ = held_drop()
+    tr, _, _ = held_drop()
     tr.y[3] = np.nan
     assert rest_samples(tr, PX_PER_M)[0] <= 3
 
@@ -199,3 +199,11 @@ def test_cli_json_has_structured_counts(tmp_path, capsys):
     cli.main([held_drop_video(tmp_path), "--px-per-m", str(VIDEO_PX_PER_M), "--tracker", "color", "--json"])
     report = json.loads(capsys.readouterr().out)
     assert report["rest_dropped"]["start"] >= 12 and report["rest_dropped"]["end"] == 0
+
+
+def test_agent_question_is_the_same_for_cli_and_api():
+    from physicslens.pipeline import agent_question
+
+    assert agent_question() == "Measure the physics in this tracked trajectory."
+    with_height = agent_question(0.9, ["dropped 3 samples"])
+    assert "0.9 m above" in with_height and "(dropped 3 samples) were already removed" in with_height

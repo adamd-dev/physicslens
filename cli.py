@@ -22,7 +22,17 @@ from physicslens.agent.tools import Toolbox, TrackData
 from physicslens.calibrate import Calibration
 from physicslens.llm.meta_client import LLMError, MetaClient
 from physicslens.physics import models
-from physicslens.pipeline import FITS, TrackSettings, choose, load, release_question, run_fits, to_track_data, track, trim_rest
+from physicslens.pipeline import (
+    FITS,
+    TrackSettings,
+    agent_question,
+    choose,
+    load,
+    run_fits,
+    to_track_data,
+    track,
+    trim_rest,
+)
 
 
 def _numbers(text: str, n: int, cast=float):
@@ -77,10 +87,7 @@ def report_agent(args, data: TrackData, box: Toolbox, video_warnings: Sequence[s
     """Exit codes: 0 accepted and plausible, 1 accepted but flagged, 3 setup/API failure, 4 no answer."""
     for w in video_warnings:
         print(f"  warning: {w}", file=sys.stderr)
-    question = "Measure the physics in this tracked trajectory."
-    if args.height:
-        question += f" The launch edge is {args.height} m above the landing surface; if this is a projectile, predict where it lands."
-    question += release_question(rest_notes)
+    question = agent_question(args.height, rest_notes)
     try:
         result = run_agent(make_client(), box, question)
     except (LLMError, OSError, ValueError) as exc:

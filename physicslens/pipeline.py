@@ -114,11 +114,15 @@ def trim_rest(tr: Track, px_per_m: float) -> Trim:
     return Trim(Track(tr.t[lead:end], tr.x[lead:end], tr.y[lead:end], tr.source), lead, trail, notes)
 
 
-def release_question(notes: Sequence[str]) -> str:
-    """One sentence for the agent, so its summary does not blame calibration for a pause it never saw."""
-    if not notes:
-        return ""
-    return " Samples where the ball was at rest (" + "; ".join(notes) + ") were already removed from the track."
+def agent_question(height_m: float | None = None, rest_notes: Sequence[str] = ()) -> str:
+    """The agent's task; shared by the CLI and the API so both send the same text (and hit the same cache)."""
+    question = "Measure the physics in this tracked trajectory."
+    if height_m:
+        question += f" The launch edge is {height_m} m above the landing surface; if this is a projectile, predict where it lands."
+    if rest_notes:
+        # So the summary does not blame calibration for a pause the agent never saw.
+        question += " Samples where the ball was at rest (" + "; ".join(rest_notes) + ") were already removed from the track."
+    return question
 
 
 def to_track_data(tr: Track, calibration: Calibration) -> TrackData:

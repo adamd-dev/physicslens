@@ -28,7 +28,17 @@ from .agent.tools import Toolbox
 from .calibrate import Calibration
 from .llm.meta_client import PROJECT_ROOT, LLMError, MetaClient
 from .physics import models
-from .pipeline import TrackSettings, choose, fitted_xy, load, release_question, run_fits, to_track_data, track, trim_rest
+from .pipeline import (
+    TrackSettings,
+    agent_question,
+    choose,
+    fitted_xy,
+    load,
+    run_fits,
+    to_track_data,
+    track,
+    trim_rest,
+)
 
 UPLOADS = PROJECT_ROOT / "cache" / "uploads"
 WEB_DIST = PROJECT_ROOT / "web" / "dist"
@@ -266,10 +276,7 @@ def _analyze(req: AnalyzeRequest, emit) -> None:
     before = _spent()
     if req.agent:
         emit("status", {"stage": "agent"})
-        question = "Measure the physics in this tracked trajectory."
-        if req.height_m:
-            question += f" The launch edge is {req.height_m} m above the landing surface; if this is a projectile, predict where it lands."
-        question += release_question(rest_notes)
+        question = agent_question(req.height_m, rest_notes)
         try:
             outcome = run_agent(make_client(), box, question,
                                 on_message=lambda m: emit("agent_message", dataclasses.asdict(m)))
