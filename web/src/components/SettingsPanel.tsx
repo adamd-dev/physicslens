@@ -47,25 +47,25 @@ export default function SettingsPanel({ settings, options, onSettings, onOptions
   const opt = (patch: Partial<Options>) => onOptions({ ...options, ...patch });
 
   return (
-    <div className="space-y-3">
-      <label className="flex cursor-pointer items-center justify-between rounded-xl border border-violet-500/30 bg-violet-500/10 px-3 py-2.5">
+    <div className="space-y-4">
+      <label className="flex cursor-pointer items-center justify-between gap-3 rounded-xl border border-violet-500/30 bg-violet-500/10 px-4 py-3 focus-within:ring-2 focus-within:ring-violet-400">
         <div>
           <div className="text-sm font-semibold text-violet-200">Muse agent</div>
-          <div className="text-xs text-violet-300/70">Meta's model chooses, checks and explains the fit</div>
+          <div className="text-sm text-violet-300">Meta's model chooses, checks and explains the fit</div>
         </div>
-        <input type="checkbox" className="h-4 w-4 accent-violet-400" checked={options.agent} onChange={(e) => opt({ agent: e.target.checked })} />
+        <input type="checkbox" className="h-5 w-5 shrink-0 accent-violet-400" checked={options.agent} onChange={(e) => opt({ agent: e.target.checked })} />
       </label>
 
-      <div className="grid grid-cols-2 gap-2">
+      <div className="grid grid-cols-2 gap-3">
         <Select label="Tracker" value={settings.tracker} options={[["motion", "Motion"], ["color", "Color"]]} onChange={(tracker) => set({ tracker })} />
         <Num label="Launch height (m)" value={options.height_m} step={0.01} placeholder="cup shot" onChange={(height_m) => opt({ height_m })} />
       </div>
 
-      <button className="text-xs text-slate-400 hover:text-slate-200" onClick={() => setOpen(!open)}>
-        {open ? "▾" : "▸"} Advanced
+      <button className="inline-flex min-h-6 items-center gap-1 rounded py-1 text-sm text-slate-400 hover:text-slate-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400" aria-expanded={open} onClick={() => setOpen(!open)}>
+        <span aria-hidden="true">{open ? "▾" : "▸"}</span> Advanced
       </button>
       {open && (
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-2 gap-3">
           <Num label="Min area (px)" value={settings.min_area} onChange={(v) => set({ min_area: v ?? 1 })} />
           <Num label="Max area (px)" value={settings.max_area} placeholder="auto" onChange={(max_area) => set({ max_area })} />
           <Num label="Max jump (px)" value={settings.max_jump} placeholder="off" onChange={(max_jump) => set({ max_jump })} />
@@ -81,11 +81,11 @@ export default function SettingsPanel({ settings, options, onSettings, onOptions
             <>
               <label className="block">
                 <span className="label">HSV low</span>
-                <input className="input mt-1 font-mono" value={settings.hsv_lower.join(",")} onChange={(e) => set({ hsv_lower: triple(e.target.value, settings.hsv_lower) })} />
+                <input className="input mt-1 font-mono" placeholder="0,0,200" value={settings.hsv_lower.join(",")} onChange={(e) => set({ hsv_lower: triple(e.target.value, settings.hsv_lower) })} />
               </label>
               <label className="block">
                 <span className="label">HSV high</span>
-                <input className="input mt-1 font-mono" value={settings.hsv_upper.join(",")} onChange={(e) => set({ hsv_upper: triple(e.target.value, settings.hsv_upper) })} />
+                <input className="input mt-1 font-mono" placeholder="180,60,255" value={settings.hsv_upper.join(",")} onChange={(e) => set({ hsv_upper: triple(e.target.value, settings.hsv_upper) })} />
               </label>
             </>
           )}

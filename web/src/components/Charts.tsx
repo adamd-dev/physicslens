@@ -1,7 +1,7 @@
 import { CartesianGrid, ComposedChart, Line, ReferenceLine, ResponsiveContainer, Scatter, Tooltip, XAxis, YAxis } from "recharts";
 import type { Result, TrackEvent } from "../api";
 
-const AXIS = { stroke: "#475569", fontSize: 11, tickLine: false };
+const AXIS = { stroke: "#94a3b8", fontSize: 12, tickLine: false };
 
 /** Tracked position and the fitted curve on the axis the model describes, plus residuals in mm. */
 export default function Charts({ track, result }: { track: TrackEvent; result: Result }) {
@@ -14,9 +14,9 @@ export default function Charts({ track, result }: { track: TrackEvent; result: R
   });
 
   return (
-    <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
-      <div className="panel p-3 lg:col-span-2">
-        <div className="label mb-2">{useX ? "x position" : "height (y, down)"} · m</div>
+    <section aria-label="Charts" className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+      <div className="panel p-4 xl:col-span-2">
+        <h3 className="label mb-2">{useX ? "x position" : "height (y, down)"} · m</h3>
         <ResponsiveContainer width="100%" height={190}>
           <ComposedChart data={rows} margin={{ top: 4, right: 8, bottom: 0, left: -12 }}>
             <CartesianGrid stroke="#1e293b" />
@@ -28,8 +28,8 @@ export default function Charts({ track, result }: { track: TrackEvent; result: R
           </ComposedChart>
         </ResponsiveContainer>
       </div>
-      <div className="panel p-3">
-        <div className="label mb-2">residuals · mm</div>
+      <div className="panel p-4">
+        <h3 className="label mb-2">residuals · mm</h3>
         <ResponsiveContainer width="100%" height={190}>
           <ComposedChart data={rows} margin={{ top: 4, right: 8, bottom: 0, left: -18 }}>
             <CartesianGrid stroke="#1e293b" />
@@ -40,6 +40,6 @@ export default function Charts({ track, result }: { track: TrackEvent; result: R
           </ComposedChart>
         </ResponsiveContainer>
       </div>
-    </div>
+    </section>
   );
 }

@@ -82,7 +82,7 @@ export default function AgentTimeline({ messages, running }: { messages: AgentMe
 
   if (!steps.length && !running) return null;
   return (
-    <div ref={box} className="max-h-[460px] space-y-2 overflow-y-auto pr-1">
+    <div ref={box} role="log" aria-live="polite" aria-relevant="additions" aria-label="Agent reasoning" className="max-h-[460px] space-y-3 overflow-y-auto pr-1">
       {steps.map((step, i) => {
         const b = brief(step);
         const final = step.name === "final_answer";
@@ -90,20 +90,20 @@ export default function AgentTimeline({ messages, running }: { messages: AgentMe
         return (
           <div key={step.id + i} className="rise flex gap-3">
             <div className="flex flex-col items-center">
-              <div className={`grid h-6 w-6 place-items-center rounded-full text-[11px] font-semibold ${final ? "bg-violet-500 text-white" : "bg-slate-800 text-slate-300"}`}>
+              <div className={`grid h-7 w-7 place-items-center rounded-full text-xs font-semibold ${final ? "bg-violet-500 text-white" : "bg-slate-800 text-slate-300"}`}>
                 {i + 1}
               </div>
               {i < steps.length - 1 && <div className="w-px flex-1 bg-slate-800" />}
             </div>
-            <div className="min-w-0 flex-1 pb-2">
-              {step.thought && <p className="mb-1 text-xs italic text-slate-400">“{step.thought}”</p>}
-              <div className="font-mono text-[13px] text-cyan-300">
+            <div className="min-w-0 flex-1 pb-3">
+              {step.thought && <p className="mb-1 text-sm italic text-slate-400">“{step.thought}”</p>}
+              <div className="break-words font-mono text-sm text-cyan-300">
                 {step.name}
-                <span className="text-slate-500">({args.map(([k, v]) => `${k}=${JSON.stringify(v)}`).join(", ")})</span>
+                <span className="text-slate-400">({args.map(([k, v]) => `${k}=${JSON.stringify(v)}`).join(", ")})</span>
               </div>
-              {b && <div className={`mt-1 rounded-md border px-2 py-1 text-xs ${TONE[b.tone]}`}>{b.text}</div>}
+              {b && <div className={`mt-1.5 rounded-md border px-2.5 py-1.5 text-sm ${TONE[b.tone]}`}>{b.text}</div>}
               {final && typeof step.args.summary === "string" && (
-                <p className="mt-1 text-xs text-slate-300">
+                <p className="mt-1.5 text-sm text-slate-300">
                   {step.args.accept_flagged ? <span className="font-semibold text-amber-300">Accepted with flag: </span> : null}
                   {step.args.summary}
                 </p>
@@ -113,8 +113,8 @@ export default function AgentTimeline({ messages, running }: { messages: AgentMe
         );
       })}
       {running && (
-        <div className="flex items-center gap-2 pl-9 text-xs text-slate-500">
-          <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-cyan-400" /> Muse is thinking…
+        <div className="flex items-center gap-2 pl-10 text-sm text-slate-400">
+          <span aria-hidden="true" className="h-1.5 w-1.5 animate-pulse rounded-full bg-cyan-400" /> Muse is thinking…
         </div>
       )}
     </div>

@@ -20,6 +20,11 @@ interface Props {
 const CYAN = "#22d3ee";
 const AMBER = "#fbbf24";
 const VIOLET = "#c084fc";
+const HINT: Record<Mode, string> = {
+  view: "Video with the tracked points and the fitted curve drawn on top",
+  calibrate: "Click both ends of the reference object",
+  roi: "Drag a box around the ball's path",
+};
 
 export default function VideoStage({ info, mode, points, lengthM, roi, track, result, onPoints, onRoi }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -161,19 +166,21 @@ export default function VideoStage({ info, mode, points, lengthM, roi, track, re
     <div
       className="relative mx-auto overflow-hidden rounded-xl bg-black"
       // Keep the toolbar on screen: cap the height and let the width follow the aspect ratio.
-      style={{ aspectRatio: `${info.width} / ${info.height}`, maxWidth: `calc(62vh * ${info.width / info.height})` }}
+      style={{ aspectRatio: `${info.width} / ${info.height}`, maxWidth: `calc(60svh * ${info.width / info.height})` }}
     >
-      <video ref={videoRef} src={videoUrl(info.video_id)} className="absolute inset-0 h-full w-full" controls={mode === "view"} playsInline muted />
+      <video ref={videoRef} src={videoUrl(info.video_id)} className="absolute inset-0 h-full w-full" controls={mode === "view"} preload="metadata" playsInline muted />
       <canvas
         ref={canvasRef}
+        role="img"
+        aria-label={HINT[mode]}
         className={`absolute inset-0 h-full w-full ${mode === "view" ? "pointer-events-none" : "cursor-crosshair"}`}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
       />
       {mode !== "view" && (
-        <div className="pointer-events-none absolute left-3 top-3 rounded-md bg-slate-950/80 px-2.5 py-1 text-xs text-slate-200">
-          {mode === "calibrate" ? "Click both ends of the reference object" : "Drag a box around the ball's path"}
+        <div className="pointer-events-none absolute left-3 top-3 rounded-md bg-slate-950/80 px-3 py-1.5 text-sm text-slate-200">
+          {HINT[mode]}
         </div>
       )}
     </div>
@@ -185,13 +192,13 @@ function toRoi(a: Point, b: Point): Roi {
 }
 
 function label(ctx: CanvasRenderingContext2D, text: string, x: number, y: number, color: string) {
-  ctx.font = "600 12px Inter, sans-serif";
+  ctx.font = "600 14px 'Inter Variable', Inter, sans-serif";
   const w = ctx.measureText(text).width + 10;
   ctx.fillStyle = "rgba(2,6,23,0.85)";
-  ctx.fillRect(x - w / 2, y - 10, w, 18);
+  ctx.fillRect(x - w / 2, y - 12, w, 22);
   ctx.fillStyle = color;
   ctx.textAlign = "center";
-  ctx.fillText(text, x, y + 3);
+  ctx.fillText(text, x, y + 4);
   ctx.textAlign = "start";
 }
 

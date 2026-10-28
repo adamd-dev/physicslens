@@ -3,12 +3,48 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>PhysicsLens</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+    <title>PhysicsLens: Measure Gravity from a Video of Your Experiment</title>
+    <meta name="description" content="Film a dropped ball, throw or pendulum. PhysicsLens tracks the ball, fits physics models for g, landing point and length, and Meta Muse Spark checks the fit." />
+    <meta name="color-scheme" content="dark" />
+    <meta name="theme-color" content="#020617" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <!-- Absolute og:image and a canonical link get added once the demo has a public domain. -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="PhysicsLens" />
+    <meta property="og:title" content="PhysicsLens: Measure Gravity from a Video of Your Experiment" />
+    <meta property="og:description" content="Film a physics experiment. The app tracks the ball, fits the physics, and a Meta Muse Spark agent checks the result." />
+    <meta property="og:image" content="/og-image.png" />
+    <meta property="og:image:alt" content="PhysicsLens: tracked ball trajectory with the fitted physics curve" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="PhysicsLens: Measure Gravity from a Video" />
+    <meta name="twitter:description" content="Film an experiment. Measure the physics. Checked by an agent, not guessed." />
+    <meta name="twitter:image" content="/og-image.png" />
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "WebApplication",
+        "name": "PhysicsLens",
+        "description": "Web app that tracks a ball in a video of a physics experiment, fits physics models for gravitational acceleration, landing point and pendulum length, and uses Meta Muse Spark as an agent to check the fit.",
+        "applicationCategory": "EducationalApplication",
+        "applicationSubCategory": "Physics",
+        "operatingSystem": "Any (web browser)",
+        "inLanguage": "en"
+      }
+    </script>
   </head>
   <body class="bg-slate-950 text-slate-100 antialiased">
     <div id="root"></div>
+    <noscript>
+      <main style="max-width: 40rem; margin: 4rem auto; padding: 0 1rem; font-family: system-ui, sans-serif">
+        <h1>PhysicsLens</h1>
+        <p>
+          Film a dropped ball, a throw or a pendulum. PhysicsLens tracks the ball, fits physics models for g, the landing point and the pendulum length,
+          and a Meta Muse Spark agent checks the fit. Physics fits are deterministic (SciPy).
+        </p>
+        <p>This app needs JavaScript to run.</p>
+      </main>
+    </noscript>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

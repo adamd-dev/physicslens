@@ -1,11 +1,13 @@
-import { useRef, useState } from "react";
+import { lazy, Suspense, useRef, useState } from "react";
 import type { AgentMessage, Point, Result, Settings, StreamEvent, TrackEvent, VideoInfo } from "./api";
 import { analyze, uploadVideo } from "./api";
 import AgentTimeline from "./components/AgentTimeline";
-import Charts from "./components/Charts";
 import ResultCard from "./components/ResultCard";
 import SettingsPanel, { type Options } from "./components/SettingsPanel";
 import VideoStage, { type Mode, type Roi } from "./components/VideoStage";
+
+// Recharts is heavy and only needed after a result, so keep it out of the first load.
+const Charts = lazy(() => import("./components/Charts"));
 
 const DEFAULT_SETTINGS: Settings = {
   tracker: "motion",
@@ -116,65 +118,74 @@ export default function App() {
   const pxPerM = calibrated ? Math.hypot(points[1][0] - points[0][0], points[1][1] - points[0][1]) / lengthM : null;
 
   return (
-    <div className="mx-auto max-w-[1400px] px-5 py-5">
-      <header className="mb-5 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="grid h-9 w-9 place-items-center rounded-xl bg-gradient-to-br from-cyan-400 to-violet-500 text-lg font-bold text-slate-950">ϕ</div>
+    <div className="mx-auto max-w-[1400px] px-5 py-4">
+      <header className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-3">
+          <div aria-hidden="true" className="grid h-9 w-9 place-items-center rounded-xl bg-gradient-to-br from-cyan-400 to-violet-500 text-lg font-bold text-slate-950">ϕ</div>
           <div>
             <h1 className="text-lg font-semibold leading-tight">PhysicsLens</h1>
-            <p className="text-xs text-slate-400">Film an experiment. Measure the physics. Checked by an agent, not guessed.</p>
+            <p className="text-sm text-slate-400">Film an experiment. Measure the physics. Checked by an agent, not guessed.</p>
           </div>
         </div>
         {info && (
-          <label className="btn-ghost cursor-pointer">
+          <label className="btn-ghost cursor-pointer focus-within:ring-2 focus-within:ring-cyan-400">
             {uploading ? "Uploading…" : "New video"}
-            <input type="file" accept="video/*" className="hidden" onChange={(e) => e.target.files?.[0] && onFile(e.target.files[0])} />
+            <input type="file" accept="video/*" className="sr-only" onChange={(e) => e.target.files?.[0] && onFile(e.target.files[0])} />
           </label>
         )}
       </header>
 
+      <main>
       {!info ? (
         <Upload onFile={onFile} uploading={uploading} error={error} />
       ) : (
-        <div className="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_400px]">
-          <main className="space-y-4">
-            <div className="panel p-3">
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_360px] xl:grid-cols-[minmax(0,1fr)_400px]">
+          <section aria-label="Video and charts" className="space-y-4">
+            <div className="panel p-4">
               <VideoStage info={info} mode={mode} points={points} lengthM={lengthM} roi={roi} track={track} result={result} onPoints={setPoints} onRoi={setRoi} />
-              <div className="mt-3 flex flex-wrap items-center gap-2">
-                <button className={mode === "calibrate" ? "btn-active" : "btn-ghost"} onClick={() => setMode("calibrate")}>
-                  📏 Scale
+              <div className="mt-4 flex flex-wrap items-center gap-2">
+                <button className={mode === "calibrate" ? "btn-active" : "btn-ghost"} aria-pressed={mode === "calibrate"} onClick={() => setMode("calibrate")}>
+                  <span aria-hidden="true">📏</span> Scale
                 </button>
-                <button className={mode === "roi" ? "btn-active" : "btn-ghost"} onClick={() => setMode("roi")}>
-                  ⬚ Search area
+                <button className={mode === "roi" ? "btn-active" : "btn-ghost"} aria-pressed={mode === "roi"} onClick={() => setMode("roi")}>
+                  <span aria-hidden="true">⬚</span> Search area
                 </button>
-                <button className={mode === "view" ? "btn-active" : "btn-ghost"} onClick={() => setMode("view")}>
-                  ▶ Play
+                <button className={mode === "view" ? "btn-active" : "btn-ghost"} aria-pressed={mode === "view"} onClick={() => setMode("view")}>
+                  <span aria-hidden="true">▶</span> Play
                 </button>
-                <div className="ml-2 flex items-center gap-2 text-sm text-slate-400">
+                <div className="ml-1 flex items-center gap-2 text-sm text-slate-400">
                   reference =
-                  <input className="input w-20 font-mono" type="number" step={0.01} min={0.01} value={lengthM} onChange={(e) => setLengthM(Number(e.target.value) || 1)} />
+                  <input className="input w-24 font-mono" aria-label="Reference length in metres" type="number" step={0.01} min={0.01} value={lengthM} onChange={(e) => setLengthM(Number(e.target.value) || 1)} />
                   m
                 </div>
-                <div className="ml-auto font-mono text-xs text-slate-500">
+                <div className="w-full font-mono text-sm text-slate-400 sm:ml-auto sm:w-auto">
                   {info.width}×{info.height} · {info.fps.toFixed(1)} fps{pxPerM && ` · ${pxPerM.toFixed(1)} px/m`}
                   {roi && " · area set"}
                 </div>
               </div>
             </div>
-            {track && result && <Charts track={track} result={result} />}
-          </main>
+            {track && result && (
+              <Suspense fallback={<div className="panel h-[262px]" />}>
+                <Charts track={track} result={result} />
+              </Suspense>
+            )}
+          </section>
 
-          <aside className="space-y-4">
+          <aside aria-label="Analysis controls" className="space-y-4 xl:sticky xl:top-4 xl:max-h-[calc(100vh-2rem)] xl:self-start xl:overflow-y-auto">
             <div className="panel space-y-4 p-4">
               <Checklist calibrated={calibrated} roi={!!roi} />
               <SettingsPanel settings={settings} options={options} onSettings={setSettings} onOptions={setOptions} />
               <button
-                className="btn w-full bg-gradient-to-r from-cyan-400 to-violet-500 py-2.5 text-base font-semibold text-slate-950 hover:brightness-110"
+                className="btn min-h-10 w-full bg-gradient-to-r from-cyan-400 to-violet-500 text-base font-semibold text-slate-950 hover:brightness-110"
                 disabled={!calibrated || running}
+                aria-busy={running}
                 onClick={run}
               >
                 {running ? `${STAGES[stage ?? ""] ?? "Starting"}…` : "Analyze"}
               </button>
+              <div className="sr-only" role="status">
+                {running ? `${STAGES[stage ?? ""] ?? "Starting"}…` : ""}
+              </div>
               {running && (
                 <button className="btn-ghost w-full" onClick={() => abort.current?.abort()}>
                   Stop
@@ -182,23 +193,24 @@ export default function App() {
               )}
             </div>
 
-            {error && <div className="rise rounded-xl border border-rose-500/40 bg-rose-500/10 p-3 text-sm text-rose-200">{error}</div>}
+            {error && <div role="alert" className="rise rounded-xl border border-rose-500/40 bg-rose-500/10 p-4 text-sm text-rose-200">{error}</div>}
             {warnings.map((w) => (
-              <div key={w} className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-2.5 text-xs text-amber-200">
+              <div key={w} className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-3 text-sm text-amber-200">
                 {w}
               </div>
             ))}
             {result && <ResultCard result={result} cost={cost} />}
             {(messages.length > 0 || (running && options.agent)) && (
               <div className="panel p-4">
-                <div className="label mb-3">Agent reasoning · live</div>
+                <h2 className="label mb-4">Agent reasoning · live</h2>
                 <AgentTimeline messages={messages} running={running && stage === "agent"} />
               </div>
             )}
           </aside>
         </div>
       )}
-      <footer className="mt-8 text-center text-xs text-slate-600">Runtime model: Meta Muse Spark via the Meta Model API · physics fits are deterministic (SciPy)</footer>
+      </main>
+      <footer className="mt-8 text-center text-sm text-slate-400">Runtime model: Meta Muse Spark via the Meta Model API · physics fits are deterministic (SciPy)</footer>
     </div>
   );
 }
@@ -206,13 +218,14 @@ export default function App() {
 function Checklist({ calibrated, roi }: { calibrated: boolean; roi: boolean }) {
   const item = (done: boolean, text: string, optional = false) => (
     <li className={`flex items-center gap-2 ${done ? "text-emerald-300" : "text-slate-400"}`}>
-      <span className={`grid h-4 w-4 place-items-center rounded-full text-[10px] ${done ? "bg-emerald-500/20" : "bg-slate-800"}`}>{done ? "✓" : ""}</span>
+      <span aria-hidden="true" className={`grid h-5 w-5 place-items-center rounded-full text-xs ${done ? "bg-emerald-500/20" : "bg-slate-800"}`}>{done ? "✓" : ""}</span>
+      <span className="sr-only">{done ? "Done:" : "To do:"}</span>
       {text}
-      {optional && <span className="text-slate-600">(optional)</span>}
+      {optional && <span className="text-slate-400">(optional)</span>}
     </li>
   );
   return (
-    <ul className="space-y-1.5 text-sm">
+    <ul className="space-y-2 text-sm">
       {item(true, "Video loaded")}
       {item(calibrated, "Scale: click both ends of a ruler")}
       {item(roi, "Search area around the ball", true)}
@@ -224,7 +237,8 @@ function Upload({ onFile, uploading, error }: { onFile: (f: File) => void; uploa
   const [over, setOver] = useState(false);
   return (
     <label
-      className={`panel flex h-[60vh] cursor-pointer flex-col items-center justify-center gap-3 border-2 border-dashed transition ${over ? "border-cyan-400 bg-cyan-400/5" : "border-slate-700"}`}
+      aria-describedby="upload-help"
+      className={`panel flex min-h-[60svh] cursor-pointer flex-col items-center justify-center gap-3 border-2 border-dashed p-6 transition focus-within:ring-2 focus-within:ring-cyan-400 ${over ? "border-cyan-400 bg-cyan-400/5" : "border-slate-700"}`}
       onDragOver={(e) => {
         e.preventDefault();
         setOver(true);
@@ -236,13 +250,13 @@ function Upload({ onFile, uploading, error }: { onFile: (f: File) => void; uploa
         if (e.dataTransfer.files[0]) onFile(e.dataTransfer.files[0]);
       }}
     >
-      <div className="text-5xl">🎥</div>
+      <div aria-hidden="true" className="text-5xl">🎥</div>
       <div className="text-lg font-semibold">{uploading ? "Uploading…" : "Drop a video of your experiment"}</div>
-      <div className="max-w-md text-center text-sm text-slate-400">
+      <div id="upload-help" className="max-w-md text-center text-sm text-slate-400">
         A dropped ball, a throw, or a pendulum. Keep the phone still and put a ruler or a sheet of A4 in the plane of motion.
       </div>
       {error && <div className="text-sm text-rose-300">{error}</div>}
-      <input type="file" accept="video/*" className="hidden" onChange={(e) => e.target.files?.[0] && onFile(e.target.files[0])} />
+      <input type="file" accept="video/*" className="sr-only" onChange={(e) => e.target.files?.[0] && onFile(e.target.files[0])} />
     </label>
   );
 }
