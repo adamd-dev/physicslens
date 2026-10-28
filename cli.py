@@ -21,6 +21,7 @@ from physicslens.agent.loop import run_agent
 from physicslens.agent.tools import Toolbox, TrackData
 from physicslens.calibrate import Calibration
 from physicslens.llm.meta_client import LLMError, MetaClient
+from physicslens.llm.sam_client import SamClient
 from physicslens.physics import models
 from physicslens.pipeline import (
     FITS,
@@ -48,7 +49,11 @@ def parse_args(argv=None):
     scale = p.add_mutually_exclusive_group(required=True)
     scale.add_argument("--px-per-m", type=float, help="pixels per metre in the plane of motion")
     scale.add_argument("--ref", type=lambda s: _numbers(s, 5), help="x1,y1,x2,y2,length_m of a reference object")
-    p.add_argument("--tracker", choices=["motion", "color"], default="motion")
+    p.add_argument("--tracker", choices=["motion", "color", "sam"], default="motion",
+                   help="sam: Meta SAM 3.1 over the Model API (needs MODEL_API_KEY), motion tracker if it fails")
+    p.add_argument("--sam-box", type=lambda s: _numbers(s, 4, int),
+                   help="x0,y0,x1,y1 around the ball on the first frame, full-frame pixels (best for a small ball)")
+    p.add_argument("--sam-prompt", default="ball", help="what SAM looks for when no --sam-box is given")
     p.add_argument("--hsv-lower", type=lambda s: _numbers(s, 3, int), default=(0, 0, 200))
     p.add_argument("--hsv-upper", type=lambda s: _numbers(s, 3, int), default=(180, 60, 255))
     p.add_argument("--fields", choices=["none", "auto", "top", "bottom"], default="none", help="interlaced video")
@@ -81,6 +86,11 @@ def parse_args(argv=None):
 def make_client():
     """The runtime model; tests swap this for a scripted MockClient."""
     return MetaClient.from_env()
+
+
+def make_sam_client():
+    """SAM 3.1 for --tracker sam; tests swap this for a scripted fake."""
+    return SamClient.from_env()
 
 
 def report_agent(args, data: TrackData, box: Toolbox, video_warnings: Sequence[str], rest_notes: Sequence[str] = ()) -> int:
@@ -124,7 +134,8 @@ def report_agent(args, data: TrackData, box: Toolbox, video_warnings: Sequence[s
 
 def settings(args) -> TrackSettings:
     return TrackSettings(
-        args.tracker, args.hsv_lower, args.hsv_upper, args.fields, args.roi, args.min_area, args.max_area, args.max_jump
+        args.tracker, args.hsv_lower, args.hsv_upper, args.fields, args.roi, args.min_area, args.max_area, args.max_jump,
+        sam_box=args.sam_box, sam_prompt=args.sam_prompt,
     )
 
 
@@ -157,7 +168,7 @@ def main(argv=None) -> int:
         args.ref[:2], args.ref[2:4], args.ref[4]
     )
     try:
-        fields, tr = track(video, settings(args))
+        fields, tr, track_notes = track(video, settings(args), sam=lambda: make_sam_client())
     except ValueError as exc:
         print(f"tracking failed: {exc}", file=sys.stderr)
         return 2
@@ -165,7 +176,7 @@ def main(argv=None) -> int:
     rest_notes = trim.notes if trim else []
     if trim:
         tr = trim.track
-    video_warnings = [*video_warnings, *rest_notes]
+    video_warnings = [*video_warnings, *track_notes, *rest_notes]
     data = to_track_data(tr, calibration)
     box = Toolbox(data)
     if args.agent:
@@ -179,6 +190,7 @@ def main(argv=None) -> int:
         "fps": round(video.fps, 3),
         "timestamp_source": video.timestamp_source,
         "fields": fields,
+        "tracker": tr.source,
         "tracked_samples": len(tr),
         "rest_dropped": {"start": trim.lead if trim else 0, "end": trim.trail if trim else 0},
         "px_per_m": round(calibration.px_per_m, 2),
@@ -193,7 +205,7 @@ def main(argv=None) -> int:
         print(json.dumps(report, indent=2))
     else:
         print(f"{args.video}: {len(tr)}/{report['frames']} samples tracked "
-              f"(fps {report['fps']}, timestamps {video.timestamp_source}, fields {fields})")
+              f"(tracker {tr.source}, fps {report['fps']}, timestamps {video.timestamp_source}, fields {fields})")
         for w in report["warnings"]:
             print(f"  warning: {w}")
         for r in results:
@@ -202,7 +214,8 @@ def main(argv=None) -> int:
                 continue
             mark = "*" if best and r["fit_id"] == best["fit_id"] else " "
             status = "ok" if r["check"]["ok"] else "; ".join(r["check"]["problems"])
-            print(f" {mark}{r['name']:<11} r2={r['r2']:.5f} rmse={r['rmse_m'] * 1000:.2f} mm  [{status}]")
+            r2 = "n/a" if r["r2"] is None else f"{r['r2']:.5f}"  # undefined when the signal has no variance
+            print(f" {mark}{r['name']:<11} r2={r2} rmse={r['rmse_m'] * 1000:.2f} mm  [{status}]")
         if best:
             p, s = best["params"], best["stderr"]
             if "g" in p:

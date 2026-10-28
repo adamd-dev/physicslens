@@ -1,17 +1,19 @@
 """Video in, track and fits out: the steps shared by the CLI and the web API."""
 
 import warnings
-from collections.abc import Sequence
-from dataclasses import dataclass
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass, replace
 
 import numpy as np
 
 from .agent.tools import Toolbox, TrackData
 from .calibrate import Calibration
 from .ingest import Video, load_video
+from .llm.meta_client import LLMError
 from .track.base import Track
 from .track.color import track_color
 from .track.motion import field_order, track_motion
+from .track.sam import Segmenter, track_sam
 
 FITS = {"free_fall": "fit_free_fall", "projectile": "fit_projectile", "pendulum": "fit_pendulum"}
 MIN_VX = 0.1  # m/s; slower horizontal drift is camera tilt or tracking noise, not a throw
@@ -27,7 +29,7 @@ MIN_MOVING = 8  # fewer moving samples than this: too little left to fit honestl
 
 @dataclass
 class TrackSettings:
-    tracker: str = "motion"  # "motion" | "color"
+    tracker: str = "motion"  # "motion" | "color" | "sam"
     hsv_lower: tuple[int, int, int] = (0, 0, 200)
     hsv_upper: tuple[int, int, int] = (180, 60, 255)
     fields: str = "none"  # "none" | "auto" | "top" | "bottom"
@@ -35,6 +37,14 @@ class TrackSettings:
     min_area: int = 10
     max_area: int | None = None  # None: MOTION_MAX_AREA for motion, no limit for color
     max_jump: float | None = None
+    sam_box: tuple[int, int, int, int] | None = None  # around the object on the first frame; wins over the prompt
+    sam_prompt: str = "ball"
+
+
+def _sam_client() -> Segmenter:
+    from .llm.sam_client import SamClient
+
+    return SamClient.from_env()
 
 
 def load(
@@ -47,15 +57,30 @@ def load(
     return video, [str(w.message) for w in caught]
 
 
-def track(video: Video, s: TrackSettings) -> tuple[str, Track]:
-    """Returns (field mode used, track in pixels); raises ValueError when the object is not found."""
+def track(video: Video, s: TrackSettings, sam: Callable[[], Segmenter] = _sam_client) -> tuple[str, Track, list[str]]:
+    """Returns (field mode used, track in pixels, notes); raises ValueError when the object is not found.
+
+    When SAM 3.1 cannot track (no key, API error, budget, nothing found) the motion tracker takes over
+    and a note says why: the result is never silently from another tracker.
+    """
+    if s.tracker == "sam":
+        try:
+            prompt = None if s.sam_box else s.sam_prompt
+            return "none", track_sam(video, sam(), box=s.sam_box, prompt=prompt, roi=s.roi), []
+        except (LLMError, ValueError, OSError) as exc:
+            note = f"SAM 3.1 could not track ({exc}); used the motion tracker instead"
+            try:
+                fields, tr, _ = track(video, replace(s, tracker="motion"))
+            except ValueError as motion_exc:
+                raise ValueError(f"{motion_exc} ({note})") from exc
+            return fields, tr, [note]
     if s.tracker == "color":
-        return "none", track_color(video, s.hsv_lower, s.hsv_upper, s.min_area, s.max_jump, max_area=s.max_area, roi=s.roi)
+        return "none", track_color(video, s.hsv_lower, s.hsv_upper, s.min_area, s.max_jump, max_area=s.max_area, roi=s.roi), []
     kw = dict(min_area=s.min_area, max_area=s.max_area or MOTION_MAX_AREA, max_jump_px=s.max_jump, roi=s.roi)
     if s.fields == "auto":
-        return field_order(video, **kw)
+        return (*field_order(video, **kw), [])
     fields = None if s.fields == "none" else s.fields
-    return s.fields, track_motion(video, fields=fields, **kw)
+    return s.fields, track_motion(video, fields=fields, **kw), []
 
 
 def _still_run(t: np.ndarray, x: np.ndarray, y: np.ndarray, radius_px: float) -> int:
