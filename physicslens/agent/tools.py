@@ -89,8 +89,9 @@ class Toolbox:
     data: TrackData
     fits: dict[str, fit.FitResult] = field(default_factory=dict)
     durations: dict[str, float] = field(default_factory=dict)
-    # fit_id -> (points used, model, axis): lets a windowed fit be compared with the whole track.
-    windows: dict[str, tuple[int, str, str]] = field(default_factory=dict)
+    # fit_id -> (points used, model, axis, window start s): lets a windowed fit be compared with the
+    # whole track, and lets the UI draw the fitted curve over the samples it was fitted on.
+    windows: dict[str, tuple[int, str, str, float]] = field(default_factory=dict)
 
     def _fit(self, model: str, axis: str, t_start: float | None, t_end: float | None) -> dict:
         t, x, y, t0 = _window(self.data, t_start, t_end)
@@ -98,7 +99,7 @@ class Toolbox:
         fit_id = f"fit_{len(self.fits) + 1}"
         self.fits[fit_id] = result
         self.durations[fit_id] = float(t[-1] - t[0])
-        self.windows[fit_id] = (len(t), model, axis)
+        self.windows[fit_id] = (len(t), model, axis, t0)
         return _summary(fit_id, result, t0, len(t))
 
     def describe_track(self) -> dict:
@@ -144,7 +145,7 @@ class Toolbox:
         if abs(z) > MAX_RUNS_Z:
             problems.append(f"residuals are structured (runs z={z:.1f}); model shape likely wrong")
         if fit_id in self.windows:
-            n, model, axis = self.windows[fit_id]
+            n, model, axis, _ = self.windows[fit_id]
             total = len(self.data.t)
             if n < MIN_COVERAGE * total:
                 problems.append(f"fit uses only {n}/{total} points; a short window can hide a wrong model")

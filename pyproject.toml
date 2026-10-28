@@ -20,8 +20,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-ui = ["streamlit>=1.38", "plotly>=5.22"]
-dev = ["pytest>=8"]
+ui = ["fastapi>=0.115", "uvicorn>=0.30", "python-multipart>=0.0.9"]
+dev = ["pytest>=8", "httpx>=0.27"]
+
+[project.scripts]
+physicslens-ui = "physicslens.server:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

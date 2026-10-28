@@ -60,6 +60,15 @@ def test_transcript_saved_when_agent_gives_up(tmp_path, monkeypatch):
     assert out.stat().st_mode & 0o777 == 0o600
 
 
+def test_no_measurement_is_reported_not_a_number(tmp_path, monkeypatch, capsys):
+    reason = "the hand was tracked, not the ball; draw a search area"
+    monkeypatch.setattr(cli, "make_client", lambda: MockClient([Reply("", [call(1, "final_answer", summary=reason)])]))
+    assert cli.main(args(drop_video(tmp_path))) == 4
+    captured = capsys.readouterr()
+    assert f"no measurement possible: {reason}" in captured.err
+    assert "g =" not in captured.out
+
+
 def test_unwritable_transcript_only_warns(tmp_path, monkeypatch, capsys):
     scripted = MockClient([Reply("", [call(1, "fit_free_fall")]), Reply("", [call(2, "final_answer", fit_id="fit_1", summary="drop")])])
     monkeypatch.setattr(cli, "make_client", lambda: scripted)

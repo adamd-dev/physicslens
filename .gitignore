@@ -14,3 +14,6 @@ samples/tracker/
 !.env.example
 runs/
 samples/commons/
+web/node_modules/
+web/dist/
+.coverage
