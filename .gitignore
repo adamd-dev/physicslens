@@ -16,3 +16,4 @@ runs/
 samples/commons/
 web/node_modules/
 web/dist/
+.coverage
