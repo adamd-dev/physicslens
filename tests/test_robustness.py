@@ -14,7 +14,8 @@ PX_PER_M = 300
 SHIFT = 4  # cv2 sub-pixel fixed point
 
 
-def write_drop(path, capture_fps, playback_fps, n_frames, hidden=(), distractor=False, size=(640, 480)):
+def write_drop(path, capture_fps, playback_fps, n_frames, hidden=(), distractor=False, size=(640, 480), hold_frames=0):
+    """hold_frames: the ball sits still at the top for that many frames before it is released."""
     writer = cv2.VideoWriter(str(path), cv2.VideoWriter_fourcc(*"MJPG"), playback_fps, size)
     scale = 2**SHIFT
     for i in range(n_frames):
@@ -22,7 +23,7 @@ def write_drop(path, capture_fps, playback_fps, n_frames, hidden=(), distractor=
         if distractor:
             cv2.circle(frame, (80, 400), 7, (255, 255, 255), -1)
         if i not in hidden:
-            y_px = 50 + PX_PER_M * models.free_fall(i / capture_fps, 0, 0, models.G)
+            y_px = 50 + PX_PER_M * models.free_fall(max(i - hold_frames, 0) / capture_fps, 0, 0, models.G)
             cv2.circle(frame, (320 * scale, int(round(y_px * scale))), 12 * scale, (255, 255, 255), -1, cv2.LINE_AA, SHIFT)
         writer.write(frame)
     writer.release()

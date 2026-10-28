@@ -64,6 +64,40 @@ def test_calibration_from_two_points(client, tmp_path):
     assert dict(events(response))["result"]["params"]["g"] == pytest.approx(models.G, rel=0.02)
 
 
+def upload_held_drop(client, tmp_path) -> str:
+    path = tmp_path / "held.avi"
+    write_drop(path, capture_fps=60, playback_fps=60, n_frames=39, hold_frames=12)
+    with path.open("rb") as f:
+        return client.post("/api/videos", files={"file": ("held.avi", f, "video/x-msvideo")}).json()["video_id"]
+
+
+def test_ball_held_before_release_is_dropped_and_shown(client, tmp_path):
+    stream = analyze(client, upload_held_drop(client, tmp_path))
+    track = dict(stream)["track"]
+    assert "before the motion" in track["notes"][0]
+    rest = track["rest"]  # still drawn on the video, in grey
+    assert len(rest["t_play"]) >= 12 and len(rest["x_px"]) == len(rest["y_px"]) == len(rest["t_play"])
+    assert rest["t_play"][-1] < track["t_play"][0]
+    result = dict(stream)["result"]
+    assert result["params"]["g"] == pytest.approx(models.G, rel=0.02) and result["check"]["ok"]
+    assert result["curve"]["t_play"][0] == pytest.approx(track["t_play"][0])
+
+
+def test_release_detection_can_be_turned_off(client, tmp_path):
+    stream = analyze(client, upload_held_drop(client, tmp_path), detect_release=False)
+    track = dict(stream)["track"]
+    assert track["notes"] == [] and track["rest"]["t_play"] == []
+    assert len(track["t"]) == 39
+
+
+def test_agent_is_told_about_the_dropped_samples(client, tmp_path, monkeypatch):
+    scripted = MockClient([Reply("", [call(1, "final_answer", summary="test run, no measurement wanted here")])])
+    monkeypatch.setattr(server, "make_client", lambda: scripted)
+    analyze(client, upload_held_drop(client, tmp_path), agent=True)
+    question = scripted.requests[0][1].content
+    assert "at rest" in question and "already removed" in question
+
+
 def call(i, name, **arguments):
     return {"id": f"c{i}", "name": name, "arguments": json.dumps(arguments)}
 

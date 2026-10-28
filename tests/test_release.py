@@ -100,3 +100,28 @@ def test_kept_track_keeps_original_times():
     lead = len(tr) - len(kept)
     assert np.array_equal(kept.t, tr.t[lead:])
     assert kept.source == tr.source
+
+
+def held_drop_video(tmp_path):
+    from tests.test_robustness import write_drop
+
+    path = tmp_path / "held.avi"
+    write_drop(path, capture_fps=60, playback_fps=60, n_frames=39, hold_frames=12)
+    return str(path)
+
+
+def test_cli_trims_and_says_so(tmp_path, capsys):
+    import cli
+    from tests.test_robustness import PX_PER_M as VIDEO_PX_PER_M
+
+    assert cli.main([held_drop_video(tmp_path), "--px-per-m", str(VIDEO_PX_PER_M), "--tracker", "color"]) == 0
+    out = capsys.readouterr().out
+    assert "warning: dropped" in out and "before the motion" in out
+
+
+def test_cli_keep_rest_turns_it_off(tmp_path, capsys):
+    import cli
+    from tests.test_robustness import PX_PER_M as VIDEO_PX_PER_M
+
+    cli.main([held_drop_video(tmp_path), "--px-per-m", str(VIDEO_PX_PER_M), "--tracker", "color", "--keep-rest"])
+    assert "dropped" not in capsys.readouterr().out
