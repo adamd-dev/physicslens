@@ -283,16 +283,16 @@ class MetaClient:
     def _log_cost(self, tokens: tuple[int, int], estimated: bool) -> None:
         price_in, price_out = self._price()
         cost = (tokens[0] * price_in + tokens[1] * price_out) / 1_000_000
+        self._log_row(tokens, cost, "estimated" if estimated else "measured")
+
+    def _log_row(self, tokens: tuple[int, int], cost: float, how: str) -> None:
         new = not self.cost_log.is_file()
         self.cost_log.parent.mkdir(parents=True, exist_ok=True)
         with self.cost_log.open("a", newline="") as f:
             writer = csv.writer(f)
             if new:
                 writer.writerow(COST_FIELDS)
-            writer.writerow([
-                datetime.now(timezone.utc).isoformat(), self.model, tokens[0], tokens[1], f"{cost:.6f}",
-                "estimated" if estimated else "measured",
-            ])
+            writer.writerow([datetime.now(timezone.utc).isoformat(), self.model, tokens[0], tokens[1], f"{cost:.6f}", how])
 
     # --- cache -------------------------------------------------------------------
 
@@ -357,8 +357,17 @@ class MetaClient:
         return max(0.0, min(delay, MAX_RETRY_AFTER_S))
 
     def _send(self, body: bytes) -> tuple[dict, bytes]:
-        url = f"{self.base_url}/chat/completions"
-        headers = {"Authorization": f"Bearer {self._api_key}", "Content-Type": "application/json"}
+        raw = self._request("chat/completions", body, "application/json")
+        try:
+            return json.loads(raw), raw
+        except json.JSONDecodeError:
+            snippet = self._redact(raw.decode("utf-8", "replace"))[:300]
+            raise LLMResponseError(f"HTTP 200 with a non-JSON body: {snippet!r}") from None
+
+    def _request(self, path: str, body: bytes, content_type: str) -> bytes:
+        """POST with the retry policy; returns the HTTP 200 body."""
+        url = f"{self.base_url}/{path}"
+        headers = {"Authorization": f"Bearer {self._api_key}", "Content-Type": content_type}
         failure = "no attempt made"
         for attempt in range(self.max_retries):
             resp_headers = None
@@ -371,10 +380,7 @@ class MetaClient:
             else:
                 snippet = self._redact(raw.decode("utf-8", "replace"))[:300]
                 if status == 200:
-                    try:
-                        return json.loads(raw), raw
-                    except json.JSONDecodeError:
-                        raise LLMResponseError(f"HTTP 200 with a non-JSON body: {snippet!r}") from None
+                    return raw
                 if status in (401, 403):
                     raise LLMAuthError(f"HTTP {status}: check MODEL_API_KEY and model access ({snippet})")
                 if status not in RETRY_STATUSES and status < 500:

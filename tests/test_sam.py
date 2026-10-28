@@ -7,9 +7,20 @@ import numpy as np
 import pytest
 
 from physicslens.ingest import Video, load_video
-from physicslens.llm.meta_client import BudgetExceededError, LLMRequestError, LLMResponseError, LLMTransportError
+from physicslens.llm.meta_client import (
+    BudgetExceededError,
+    LLMRequestError,
+    LLMResponseError,
+    LLMTransportError,
+)
 from physicslens.llm.sam_client import SamClient, stream_text
-from physicslens.track.sam import box_prompt, encode_clip, parse_frames, pick_object, track_sam
+from physicslens.track.sam import (
+    box_prompt,
+    encode_clip,
+    parse_frames,
+    pick_object,
+    track_sam,
+)
 
 FIXTURES = Path(__file__).parent / "fixtures" / "sam"
 KEY = "sk-test-SECRET-123"
@@ -173,7 +184,7 @@ class FakePost:
 
 def client(tmp_path, *responses, **kw):
     post = FakePost(*responses)
-    defaults = dict(cache_dir=tmp_path / "cache", cost_log=tmp_path / "costs.csv", post=post, sleep=lambda s: None)
+    defaults = {"cache_dir": tmp_path / "cache", "cost_log": tmp_path / "costs.csv", "post": post, "sleep": lambda s: None}
     return SamClient(KEY, **{**defaults, **kw}), post
 
 
