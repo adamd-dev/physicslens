@@ -19,7 +19,7 @@ export interface Scale {
 }
 
 export interface Settings {
-  tracker: "motion" | "color";
+  tracker: "motion" | "color" | "sam";
   hsv_lower: [number, number, number];
   hsv_upper: [number, number, number];
   fields: "none" | "auto" | "top" | "bottom";
@@ -27,6 +27,8 @@ export interface Settings {
   min_area: number;
   max_area: number | null;
   max_jump: number | null;
+  sam_box: [number, number, number, number] | null; // around the ball on the first frame, source pixels
+  sam_prompt: string; // what SAM looks for when there is no box
 }
 
 export interface AnalyzeRequest {
@@ -45,6 +47,7 @@ export interface AnalyzeRequest {
 
 export interface TrackEvent {
   fields: string;
+  source: "motion" | "color" | "sam"; // the tracker that produced the points (SAM falls back to motion)
   px_per_m: number;
   t: number[];
   t_play: number[];

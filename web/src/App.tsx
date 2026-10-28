@@ -18,8 +18,11 @@ const DEFAULT_SETTINGS: Settings = {
   min_area: 10,
   max_area: null,
   max_jump: null,
+  sam_box: null,
+  sam_prompt: "ball",
 };
 const DEFAULT_OPTIONS: Options = { start: 0, end: null, capture_fps: null, model: "auto", axis: "x", agent: true, height_m: null, detect_release: true };
+const TRACKERS: Record<string, string> = { motion: "motion", color: "color", sam: "SAM 3.1" };
 const STAGES: Record<string, string> = { loading: "Loading frames", tracking: "Tracking the ball", fitting: "Fitting models", agent: "Muse is reasoning" };
 
 export default function App() {
@@ -29,6 +32,7 @@ export default function App() {
   const [points, setPoints] = useState<Point[]>([]);
   const [lengthM, setLengthM] = useState(1);
   const [roi, setRoi] = useState<Roi | null>(null);
+  const [ballBox, setBallBox] = useState<Roi | null>(null);
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
   const [options, setOptions] = useState(DEFAULT_OPTIONS);
 
@@ -59,6 +63,7 @@ export default function App() {
       reset();
       setPoints([]);
       setRoi(null);
+      setBallBox(null);
       setMode("calibrate");
       setInfo(uploaded);
     } catch (e) {
@@ -103,7 +108,7 @@ export default function App() {
     abort.current = new AbortController();
     try {
       await analyze(
-        { video_id: info.video_id, scale: { p1: points[0], p2: points[1], length_m: lengthM }, settings: { ...settings, roi }, ...options },
+        { video_id: info.video_id, scale: { p1: points[0], p2: points[1], length_m: lengthM }, settings: { ...settings, roi, sam_box: sam ? ballBox : null }, ...options },
         onEvent,
         abort.current.signal,
       );
@@ -116,6 +121,7 @@ export default function App() {
   };
 
   const calibrated = points.length === 2;
+  const sam = settings.tracker === "sam";
   const pxPerM = calibrated ? Math.hypot(points[1][0] - points[0][0], points[1][1] - points[0][1]) / lengthM : null;
 
   return (
@@ -143,7 +149,10 @@ export default function App() {
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_360px] xl:grid-cols-[minmax(0,1fr)_400px]">
           <section aria-label="Video and charts" className="space-y-4">
             <div className="panel p-4">
-              <VideoStage info={info} mode={mode} points={points} lengthM={lengthM} roi={roi} track={track} result={result} onPoints={setPoints} onRoi={setRoi} />
+              <VideoStage
+                info={info} mode={mode} points={points} lengthM={lengthM} roi={roi} ballBox={sam ? ballBox : null} startS={options.start}
+                track={track} result={result} onPoints={setPoints} onRoi={setRoi} onBallBox={setBallBox}
+              />
               <div className="mt-4 flex flex-wrap items-center gap-2">
                 <button className={mode === "calibrate" ? "btn-active" : "btn-ghost"} aria-pressed={mode === "calibrate"} onClick={() => setMode("calibrate")}>
                   <span aria-hidden="true">📏</span> Scale
@@ -151,6 +160,11 @@ export default function App() {
                 <button className={mode === "roi" ? "btn-active" : "btn-ghost"} aria-pressed={mode === "roi"} onClick={() => setMode("roi")}>
                   <span aria-hidden="true">⬚</span> Search area
                 </button>
+                {sam && (
+                  <button className={mode === "ball" ? "btn-active" : "btn-ghost"} aria-pressed={mode === "ball"} onClick={() => setMode("ball")}>
+                    <span aria-hidden="true">◎</span> Ball
+                  </button>
+                )}
                 <button className={mode === "view" ? "btn-active" : "btn-ghost"} aria-pressed={mode === "view"} onClick={() => setMode("view")}>
                   <span aria-hidden="true">▶</span> Play
                 </button>
@@ -162,6 +176,7 @@ export default function App() {
                 <div className="w-full font-mono text-sm text-slate-400 sm:ml-auto sm:w-auto">
                   {info.width}×{info.height} · {info.fps.toFixed(1)} fps{pxPerM && ` · ${pxPerM.toFixed(1)} px/m`}
                   {roi && " · area set"}
+                  {track && ` · tracked by ${TRACKERS[track.source] ?? track.source}`}
                 </div>
               </div>
             </div>
@@ -174,7 +189,7 @@ export default function App() {
 
           <aside aria-label="Analysis controls" className="space-y-4 xl:sticky xl:top-4 xl:max-h-[calc(100vh-2rem)] xl:self-start xl:overflow-y-auto">
             <div className="panel space-y-4 p-4">
-              <Checklist calibrated={calibrated} roi={!!roi} />
+              <Checklist calibrated={calibrated} roi={!!roi} ballBox={sam ? !!ballBox : null} />
               <SettingsPanel settings={settings} options={options} onSettings={setSettings} onOptions={setOptions} />
               <button
                 className="btn min-h-10 w-full bg-gradient-to-r from-cyan-400 to-violet-500 text-base font-semibold text-slate-950 hover:brightness-110"
@@ -182,10 +197,10 @@ export default function App() {
                 aria-busy={running}
                 onClick={run}
               >
-                {running ? `${STAGES[stage ?? ""] ?? "Starting"}…` : "Analyze"}
+                {running ? `${stageText(stage, sam)}…` : "Analyze"}
               </button>
               <div className="sr-only" role="status">
-                {running ? `${STAGES[stage ?? ""] ?? "Starting"}…` : ""}
+                {running ? `${stageText(stage, sam)}…` : ""}
               </div>
               {running && (
                 <button className="btn-ghost w-full" onClick={() => abort.current?.abort()}>
@@ -211,12 +226,17 @@ export default function App() {
         </div>
       )}
       </main>
-      <footer className="mt-8 text-center text-sm text-slate-400">Runtime model: Meta Muse Spark via the Meta Model API · physics fits are deterministic (SciPy)</footer>
+      <footer className="mt-8 text-center text-sm text-slate-400">Runtime models: Meta Muse Spark and SAM 3.1 via the Meta Model API · physics fits are deterministic (SciPy)</footer>
     </div>
   );
 }
 
-function Checklist({ calibrated, roi }: { calibrated: boolean; roi: boolean }) {
+function stageText(stage: string | null, sam: boolean): string {
+  if (stage === "tracking" && sam) return "SAM 3.1 is tracking";
+  return STAGES[stage ?? ""] ?? "Starting";
+}
+
+function Checklist({ calibrated, roi, ballBox }: { calibrated: boolean; roi: boolean; ballBox: boolean | null }) {
   const item = (done: boolean, text: string, optional = false) => (
     <li className={`flex items-center gap-2 ${done ? "text-emerald-300" : "text-slate-400"}`}>
       <span aria-hidden="true" className={`grid h-5 w-5 place-items-center rounded-full text-xs ${done ? "bg-emerald-500/20" : "bg-slate-800"}`}>{done ? "✓" : ""}</span>
@@ -229,6 +249,7 @@ function Checklist({ calibrated, roi }: { calibrated: boolean; roi: boolean }) {
     <ul className="space-y-2 text-sm">
       {item(true, "Video loaded")}
       {item(calibrated, "Scale: click both ends of a ruler")}
+      {ballBox !== null && item(ballBox, "Ball box for SAM on the first frame", true)}
       {item(roi, "Search area around the ball", true)}
     </ul>
   );
