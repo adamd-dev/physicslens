@@ -16,6 +16,8 @@ G_RANGE = (9.0, 10.6)
 MAX_RUNS_Z = 3.0
 MIN_CYCLES = 1.5  # an oscillation fit on less than this extrapolates the period
 PENDULUM_LENGTH_RANGE = (0.05, 5.0)
+MIN_COVERAGE = 0.8  # a shorter window weakens the runs test enough to hide a wrong model
+MAX_SIDEWAYS_M = 0.1  # free_fall fits y only; more x motion than this needs the projectile check
 
 
 @dataclass
@@ -37,6 +39,14 @@ def _window(data: TrackData, t_start: float | None, t_end: float | None):
         raise ValueError(f"only {int(keep.sum())} points in window; need at least 8")
     # Shift time so fitted initial values describe the start of the window.
     return data.t[keep] - data.t[keep][0], data.x[keep], data.y[keep], float(data.t[keep][0])
+
+
+def _fit_track(model: str, axis: str, t: np.ndarray, x: np.ndarray, y: np.ndarray) -> fit.FitResult:
+    if model == "free_fall":
+        return fit.fit_free_fall(t, y)
+    if model == "projectile":
+        return fit.fit_projectile(t, x, y)
+    return fit.fit_damped_oscillation(t, x if axis == "x" else y)
 
 
 def runs_z(residuals: np.ndarray) -> float:
@@ -79,12 +89,17 @@ class Toolbox:
     data: TrackData
     fits: dict[str, fit.FitResult] = field(default_factory=dict)
     durations: dict[str, float] = field(default_factory=dict)
+    # fit_id -> (points used, model, axis): lets a windowed fit be compared with the whole track.
+    windows: dict[str, tuple[int, str, str]] = field(default_factory=dict)
 
-    def _store(self, result: fit.FitResult, t: np.ndarray, t_offset: float) -> dict:
+    def _fit(self, model: str, axis: str, t_start: float | None, t_end: float | None) -> dict:
+        t, x, y, t0 = _window(self.data, t_start, t_end)
+        result = _fit_track(model, axis, t, x, y)
         fit_id = f"fit_{len(self.fits) + 1}"
         self.fits[fit_id] = result
         self.durations[fit_id] = float(t[-1] - t[0])
-        return _summary(fit_id, result, t_offset, len(t))
+        self.windows[fit_id] = (len(t), model, axis)
+        return _summary(fit_id, result, t0, len(t))
 
     def describe_track(self) -> dict:
         t, x, y = self.data.t, self.data.x, self.data.y
@@ -104,17 +119,14 @@ class Toolbox:
         }
 
     def fit_free_fall(self, t_start: float | None = None, t_end: float | None = None) -> dict:
-        t, _, y, t0 = _window(self.data, t_start, t_end)
-        return self._store(fit.fit_free_fall(t, y), t, t0)
+        return self._fit("free_fall", "y", t_start, t_end)
 
     def fit_projectile(self, t_start: float | None = None, t_end: float | None = None) -> dict:
-        t, x, y, t0 = _window(self.data, t_start, t_end)
-        return self._store(fit.fit_projectile(t, x, y), t, t0)
+        return self._fit("projectile", "y", t_start, t_end)
 
     def fit_pendulum(self, axis: str = "x", t_start: float | None = None, t_end: float | None = None) -> dict:
-        t, x, y, t0 = _window(self.data, t_start, t_end)
-        result = fit.fit_damped_oscillation(t, x if axis == "x" else y)
-        summary = self._store(result, t, t0)
+        summary = self._fit("pendulum", axis, t_start, t_end)
+        result = self.fits[summary["fit_id"]]
         summary["length_m"] = round(models.pendulum_length(result.params["omega"], result.params["gamma"]), 4)
         summary["cycles_observed"] = round(result.params["omega"] * self.durations[summary["fit_id"]] / (2 * np.pi), 2)
         return summary
@@ -131,6 +143,19 @@ class Toolbox:
         z = runs_z(result.residuals)
         if abs(z) > MAX_RUNS_Z:
             problems.append(f"residuals are structured (runs z={z:.1f}); model shape likely wrong")
+        if fit_id in self.windows:
+            n, model, axis = self.windows[fit_id]
+            total = len(self.data.t)
+            if n < MIN_COVERAGE * total:
+                problems.append(f"fit uses only {n}/{total} points; a short window can hide a wrong model")
+            if n < total:
+                full_z = runs_z(_fit_track(model, axis, self.data.t - self.data.t[0], self.data.x, self.data.y).residuals)
+                if abs(full_z) > MAX_RUNS_Z:
+                    problems.append(
+                        f"the full track fails this model (runs z={full_z:.1f}); the window hides it unless the dropped samples are bad"
+                    )
+            if model == "free_fall" and np.ptp(self.data.x) > MAX_SIDEWAYS_M:
+                problems.append(f"ball moves {np.ptp(self.data.x):.2f} m sideways; free_fall ignores x, use fit_projectile")
         g = result.params.get("g")
         if g is not None and not G_RANGE[0] <= g <= G_RANGE[1]:
             problems.append(f"g={g:.3f} outside plausible {G_RANGE}; check calibration or time scale")

@@ -11,13 +11,18 @@ from dataclasses import dataclass, field
 from ..llm.base import LLMClient, Message
 from .tools import TOOL_SCHEMAS, Toolbox, _schema
 
+MIN_REASON_CHARS = 20  # accept_flagged must say why; "ok" is not a reason
+
 SYSTEM_PROMPT = """You are PhysicsLens, a careful lab assistant. A phone video of a physics \
 experiment was tracked and converted to metres (y axis points down). Measure the physics.
 
 Rules:
 - Call describe_track first. Choose a model from its numbers, not from guesses.
 - Every fit must pass check_plausibility before you report it. If it fails, read the \
-problems: try another model, or trim the time window to drop bad samples at the start or end.
+problems: try another model. Trim the time window only to drop a few bad samples at the start \
+or end (occlusion, a hand in frame), never just to make a check pass.
+- Trimming cannot fix a wrong model: a window with under 80% of the points, or one where the \
+full track fails the same model, is flagged. Prefer the full-track fit and explain its flag.
 - Report values with their uncertainty. Never invent numbers that no tool returned.
 - Finish with final_answer. Use accept_flagged only if the remaining problem is understood \
 (e.g. perspective curvature) and say so in the summary."""
@@ -71,6 +76,8 @@ def _finish(box: Toolbox, args: dict) -> tuple[dict, bool]:
             "error": f"{fit_id} failed plausibility: {check['problems']}. "
             "Fix it, or call final_answer with accept_flagged=true and explain why in the summary."
         }, False
+    if not check["ok"] and len(str(args.get("summary", "")).strip()) < MIN_REASON_CHARS:
+        return {"error": f"{fit_id} failed plausibility: {check['problems']}. accept_flagged needs a summary that explains why."}, False
     return check, True
 
 

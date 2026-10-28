@@ -57,7 +57,7 @@ def test_cli_reports_no_answer_with_its_own_exit_code(tmp_path, monkeypatch, cap
 def test_cli_flags_accepted_problem_fit_on_stderr(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(cli, "make_client", lambda: MockClient([
         Reply("", [raw_call(1, "fit_pendulum", '{"axis": "y"}')]),
-        Reply("", [raw_call(2, "final_answer", '{"fit_id": "fit_1", "summary": "great", "accept_flagged": true}')]),
+        Reply("", [raw_call(2, "final_answer", '{"fit_id": "fit_1", "summary": "flagged, but y is all we tracked", "accept_flagged": true}')]),
     ]))
     assert cli.main(args(drop_video(tmp_path))) == 1
     captured = capsys.readouterr()

@@ -30,6 +30,53 @@ def test_drop_fit_passes_plausibility():
     assert box.call("check_plausibility", {"fit_id": summary["fit_id"]})["ok"]
 
 
+def curved_toss_box():
+    """TossOut-like: 21 points at 30 fps, perspective bends both axes; the full projectile fit has runs z = -4."""
+    t = np.arange(21) / 30
+    rng = np.random.default_rng(4)
+    x = 0.3 + 1.7 * t + 0.3 * t**2 + rng.normal(0, 0.001, len(t))
+    y = models.free_fall(t, 0.5, -2.3, models.G) + 0.3 * t**3 + rng.normal(0, 0.001, len(t))
+    return Toolbox(TrackData(t, x, y))
+
+
+def problems(box, summary):
+    return box.call("check_plausibility", {"fit_id": summary["fit_id"]})["problems"]
+
+
+def test_short_window_is_flagged():
+    # Real TossOut run: Muse kept shrinking the window until the runs test lost power.
+    box = curved_toss_box()
+    assert any("residuals are structured" in p for p in problems(box, box.call("fit_projectile", {})))
+    short = problems(box, box.call("fit_projectile", {"t_end": 0.37}))
+    assert any("fit uses only 12/21 points" in p for p in short)
+
+
+def test_window_cannot_hide_a_wrong_model():
+    # On this track 11 of 15 windows with >= 80% of the points pass the runs test on their own.
+    box = curved_toss_box()
+    for t_start, t_end in [(0, 0.55), (1 / 30, 0.6), (2 / 30, 0.67), (0.1, 0.67)]:
+        found = problems(box, box.call("fit_projectile", {"t_start": t_start, "t_end": t_end}))
+        assert any("full track fails" in p for p in found), (t_start, t_end, found)
+
+
+def test_edge_trim_still_passes():
+    box = drop_box()
+    trimmed = box.call("fit_free_fall", {"t_end": 0.46})
+    assert box.call("check_plausibility", {"fit_id": trimmed["fit_id"]})["ok"]
+
+
+def test_free_fall_flagged_when_ball_moves_sideways():
+    # Fitting y alone would skip the projectile check on x.
+    box = curved_toss_box()
+    assert any("sideways" in p for p in problems(box, box.call("fit_free_fall", {})))
+
+
+def test_fit_stored_without_window_info_is_still_checked():
+    box = drop_box()
+    box.fits["fit_x"] = box.fits[box.call("fit_free_fall", {})["fit_id"]]
+    assert box.call("check_plausibility", {"fit_id": "fit_x"})["ok"]
+
+
 def test_wrong_model_is_flagged():
     box = pendulum_box()
     wrong = box.call("fit_free_fall", {})

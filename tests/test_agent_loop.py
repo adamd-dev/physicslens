@@ -55,11 +55,22 @@ def test_flagged_fit_is_refused_without_explanation():
 def test_flagged_fit_accepted_with_reason():
     client = MockClient([
         Reply("", [call(1, "fit_free_fall")]),
-        Reply("", [call(2, "final_answer", fit_id="fit_1", summary="flagged: not a drop", accept_flagged=True)]),
+        Reply("", [call(2, "final_answer", fit_id="fit_1", summary="flagged: not a drop, x oscillates", accept_flagged=True)]),
     ])
     result = run_agent(client, pendulum_box())
     assert result.fit_id == "fit_1"
     assert not result.check["ok"]
+
+
+def test_flagged_fit_needs_a_real_reason():
+    client = MockClient([
+        Reply("", [call(1, "fit_free_fall")]),
+        Reply("", [call(2, "final_answer", fit_id="fit_1", summary="ok", accept_flagged=True)]),
+    ])
+    result = run_agent(client, pendulum_box(), max_steps=2)
+    refused = json.loads(result.transcript[-1].content)
+    assert "explain" in refused["error"]
+    assert result.fit_id is None
 
 
 def test_step_limit_and_bad_json():

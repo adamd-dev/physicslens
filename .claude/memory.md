@@ -10,6 +10,8 @@ Durable decisions and hard-won facts that the code and git history do not explai
 ## External API facts (dev.meta.ai docs, checked 2026-10-27)
 - Meta Model API: base `https://api.meta.ai/v1`, Bearer `MODEL_API_KEY`, OpenAI-compatible, tool calling supported. Text model `muse-spark-1.3`.
 - Model id `meta-models/muse-spark-open-1026` from early notes was not found anywhere; docs show `meta-models/muse-spark-open`. Keep the model id configurable.
+- Confirmed by real runs 2026-10-28: Muse sends tool `arguments` as a JSON string, often several tool calls per turn, and empty text content on the final turn. A run costs about $0.01 to $0.03 (4 to 12 steps).
+- python.org Python 3.13 on macOS ships without root certificates (`CERTIFICATE_VERIFY_FAILED`). Fixed by running `/Applications/Python 3.13/Install Certificates.command`.
 - SAM 3.1: model `sam-3.1` via Responses streaming; text prompt (e.g. "ball") or box/point tokens, not both. One text line per frame with boxes in source pixels and base85 masks. Frames can be missing or out of order; object ids are not dense. $0.20 per 1000 frames, 50-frame minimum per request.
 
 ## Real-video lessons
@@ -18,6 +20,12 @@ Durable decisions and hard-won facts that the code and git history do not explai
 - A white metre stick defeats the color tracker; the motion tracker removes it via median background, and its tick marks flicker under compression, so pixels moving in >30% of frames are masked.
 - Reference results: BallDrop g = 9.728 ± 0.021 (-0.8%, all checks pass); BallTossOut g = 10.01 (+2.1%, U-shaped x residuals, likely perspective); Pendulum L = 1.005 m vs 1 m (one cycle only, flagged).
 - Tracker sample videos have no stated license: keep them out of git and out of the demo.
+
+## Agent behaviour lessons
+- Window shopping: on BallTossOut, Muse fitted 12 time windows until one passed the runs test (12/21 points, g = 9.845, "ok"). A shorter window weakens the test, so the curvature was hidden, not fixed.
+- Fix in `check_plausibility`: flag windows with < 80% of the points, and flag any window when the full track fails the same model. Also flag free_fall when x moves > 0.1 m. `accept_flagged` needs a reason of at least 20 characters.
+- The runs test pools x and y residuals, so curvature in x alone gets diluted. A test fixture needs curvature on both axes to reproduce the real failure.
+- After the fix, Muse reports the full-track TossOut fit as flagged with an honest reason (perspective). Expect exit 1 on TossOut and Pendulum: that is the correct outcome.
 
 ## Environment
 - macOS 12 Intel + Python 3.13: opencv-python-headless >= 4.11 has no wheel and builds from source for 1h+. Pin `<4.11`.
