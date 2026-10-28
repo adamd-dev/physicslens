@@ -68,7 +68,8 @@ export interface Check {
 
 export interface Landing {
   landing_distance_m: number;
-  uncertainty_m: number | null;
+  uncertainty_m: number | null; // fit plus scale reading
+  fit_uncertainty_m: number | null;
   flight_time_s: number;
   g_used: number;
 }
@@ -79,6 +80,9 @@ export interface Result {
   axis: "x" | "y";
   params: Record<string, number | null>;
   stderr: Record<string, number | null>;
+  stderr_total: Record<string, number | null>; // fit noise plus the scale reading
+  scale_rel_err: number;
+  deviation_pct: { g?: number };
   r2: number | null;
   rmse_m: number;
   check: Check;

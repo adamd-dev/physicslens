@@ -19,7 +19,9 @@ function Quantity({ name, value, err, unit, note }: { name: string; value: numbe
 
 export default function ResultCard({ result, cost }: { result: Result; cost: number | null }) {
   const p = result.params;
-  const s = result.stderr;
+  const s = result.stderr_total;
+  const fitErr = result.stderr.g;
+  const dev = result.deviation_pct.g;
   const ok = result.check.ok;
   return (
     <div role="status" className="rise panel p-4">
@@ -35,7 +37,14 @@ export default function ResultCard({ result, cost }: { result: Result; cost: num
 
       <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
         {p.g != null && (
-          <Quantity name="gravity g" value={p.g} err={s.g} unit="m/s²" note={`${(((p.g - G) / G) * 100).toFixed(1)}% vs ${G}`} />
+          <div>
+            <Quantity name="gravity g" value={p.g} err={s.g} unit="m/s²" note={dev != null ? `${Math.abs(dev).toFixed(1)}% from ${G}` : undefined} />
+            {fitErr != null && (
+              <div className="text-xs text-slate-500">
+                ± = fit {fitErr.toFixed(3)} and scale {(Math.abs(p.g) * result.scale_rel_err).toFixed(3)} · perspective not included
+              </div>
+            )}
+          </div>
         )}
         {result.model === "projectile" && p.vx != null && <Quantity name="horizontal speed" value={p.vx} err={s.vx} unit="m/s" />}
         {result.length_m != null && <Quantity name="pendulum length" value={result.length_m} unit="m" />}

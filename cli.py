@@ -18,8 +18,8 @@ from collections.abc import Sequence
 import numpy as np
 
 from physicslens.agent.loop import run_agent
-from physicslens.agent.tools import Toolbox, TrackData
-from physicslens.calibrate import Calibration
+from physicslens.agent.tools import Toolbox, TrackData, total_stderr
+from physicslens.calibrate import READ_PX, Calibration
 from physicslens.llm.meta_client import LLMError, MetaClient
 from physicslens.llm.sam_client import SamClient
 from physicslens.physics import models
@@ -124,8 +124,9 @@ def report_agent(args, data: TrackData, box: Toolbox, video_warnings: Sequence[s
     fit = box.fits[result.fit_id]
     status = "ok" if result.check["ok"] else "; ".join(result.check["problems"])
     print(f"agent chose {result.fit_id} ({fit.model}) in {result.steps} steps: r2={fit.r2:.5f} [{status}]")
+    total = total_stderr(fit, box.scale_rel_err)  # fit noise plus the scale reading
     for name, value in fit.params.items():
-        print(f"  {name} = {value:.4f} ± {fit.stderr[name]:.4f}")
+        print(f"  {name} = {value:.4f} ± {total[name]:.4f}")
     print(f"\n  model summary (written by the model, not verified): {result.summary}")
     if not result.check["ok"]:
         print(f"WARNING: the model accepted a fit that failed checks: {status}", file=sys.stderr)
@@ -180,7 +181,7 @@ def main(argv=None) -> int:
         tr = trim.track
     video_warnings = [*video_warnings, *track_notes, *rest_notes]
     data = to_track_data(tr, calibration)
-    box = Toolbox(data)
+    box = Toolbox(data, scale_rel_err=calibration.rel_err)
     if args.agent:
         return report_agent(args, data, box, video_warnings, rest_notes)
     results = run_fits(box, args.model, args.axis)
@@ -219,15 +220,17 @@ def main(argv=None) -> int:
             r2 = "n/a" if r["r2"] is None else f"{r['r2']:.5f}"  # undefined when the signal has no variance
             print(f" {mark}{r['name']:<11} r2={r2} rmse={r['rmse_m'] * 1000:.2f} mm  [{status}]")
         if best:
-            p, s = best["params"], best["stderr"]
+            p, s, total = best["params"], best["stderr"], best["stderr_total"]
             if "g" in p:
                 err = 100 * (p["g"] - models.G) / models.G
-                print(f"\n  g = {p['g']:.3f} ± {s['g']:.3f} m/s²  ({err:+.1f}% vs {models.G})")
+                print(f"\n  g = {p['g']:.3f} ± {total['g']:.3f} m/s²  ({err:+.1f}% vs {models.G})")
+                print(f"    ± = fit {s['g']:.3f} and scale {abs(p['g']) * calibration.rel_err:.3f} "
+                      f"(±{READ_PX:g} px on the reference); perspective not included")
             if "length_m" in best:
                 period = 2 * np.pi / p["omega"]
                 print(f"\n  pendulum length = {best['length_m']:.3f} m  (period {period:.3f} s)")
             if "vx" in p:
-                print(f"  vx = {p['vx']:.3f} ± {s['vx']:.3f} m/s")
+                print(f"  vx = {p['vx']:.3f} ± {total['vx']:.3f} m/s")
         if "landing" in report:
             land = report["landing"]
             print(f"  landing distance = {land['landing_distance_m']:.3f} ± {land['uncertainty_m']:.3f} m")

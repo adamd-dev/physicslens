@@ -24,7 +24,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 
 from .agent.loop import run_agent
-from .agent.tools import Toolbox
+from .agent.tools import Toolbox, total_stderr
 from .calibrate import Calibration
 from .llm.meta_client import PROJECT_ROOT, LLMError, MetaClient
 from .llm.sam_client import SamClient
@@ -250,6 +250,10 @@ def _result(box: Toolbox, fit_id: str, px_per_m: float, t_offset: float, time_sc
         "axis": axis,
         "params": fit.params,
         "stderr": fit.stderr,
+        # Fit noise plus the scale reading (READ_PX on the reference); perspective is not in it, the checks flag it.
+        "stderr_total": total_stderr(fit, box.scale_rel_err),
+        "scale_rel_err": box.scale_rel_err,
+        "deviation_pct": {"g": 100 * (fit.params["g"] - models.G) / models.G} if "g" in fit.params else {},
         "r2": fit.r2,
         "rmse_m": fit.rmse,
         "check": check,
@@ -297,8 +301,8 @@ def _analyze(req: AnalyzeRequest, emit) -> None:
         rest[:trim.lead] = True
         rest[len(full) - trim.trail:] = True
     # Decoded pixels per metre: the frames were shrunk by s after the user calibrated on the source.
-    data = to_track_data(tr, Calibration.from_reference(calibration.px_per_m * s, 1.0))
-    box = Toolbox(data)
+    data = to_track_data(tr, calibration.scaled(s))
+    box = Toolbox(data, scale_rel_err=calibration.rel_err)
     t_offset = req.start + float(tr.t[0])  # real seconds from the clip start to the first sample
     emit("track", {
         "fields": fields,

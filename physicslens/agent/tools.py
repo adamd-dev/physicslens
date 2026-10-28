@@ -18,6 +18,7 @@ MIN_CYCLES = 1.5  # an oscillation fit on less than this extrapolates the period
 PENDULUM_LENGTH_RANGE = (0.05, 5.0)
 MIN_COVERAGE = 0.8  # a shorter window weakens the runs test enough to hide a wrong model
 MAX_SIDEWAYS_M = 0.1  # free_fall fits y only; more x motion than this needs the projectile check
+SCALE_FREE = {"omega", "gamma", "phase"}  # per-second and angle parameters: the metre scale does not touch them
 
 
 @dataclass
@@ -71,12 +72,21 @@ def _num(v: float, digits: int = 5) -> float | None:
     return round(float(v), digits) if np.isfinite(v) else None
 
 
-def _summary(fit_id: str, result: fit.FitResult, t_offset: float, n: int) -> dict:
+def total_stderr(result: fit.FitResult, scale_rel_err: float) -> dict[str, float]:
+    """Fit noise plus the scale reading error, in quadrature: a length off by 1% puts g off by 1%."""
+    return {
+        k: e if k in SCALE_FREE else float(np.hypot(e, abs(result.params[k]) * scale_rel_err))
+        for k, e in result.stderr.items()
+    }
+
+
+def _summary(fit_id: str, result: fit.FitResult, t_offset: float, n: int, scale_rel_err: float) -> dict:
     return {
         "fit_id": fit_id,
         "model": result.model,
         "params": {k: _num(v) for k, v in result.params.items()},
         "stderr": {k: _num(v) for k, v in result.stderr.items()},
+        "stderr_total": {k: _num(v) for k, v in total_stderr(result, scale_rel_err).items()},
         "r2": _num(result.r2),
         "rmse_m": round(result.rmse, 5),
         "window_start_s": round(t_offset, 4),
@@ -92,6 +102,7 @@ class Toolbox:
     # fit_id -> (points used, model, axis, window start s): lets a windowed fit be compared with the
     # whole track, and lets the UI draw the fitted curve over the samples it was fitted on.
     windows: dict[str, tuple[int, str, str, float]] = field(default_factory=dict)
+    scale_rel_err: float = 0.0  # Calibration.rel_err of the metres in data
 
     def _fit(self, model: str, axis: str, t_start: float | None, t_end: float | None) -> dict:
         t, x, y, t0 = _window(self.data, t_start, t_end)
@@ -100,7 +111,7 @@ class Toolbox:
         self.fits[fit_id] = result
         self.durations[fit_id] = float(t[-1] - t[0])
         self.windows[fit_id] = (len(t), model, axis, t0)
-        return _summary(fit_id, result, t0, len(t))
+        return _summary(fit_id, result, t0, len(t), self.scale_rel_err)
 
     def describe_track(self) -> dict:
         t, x, y = self.data.t, self.data.x, self.data.y
@@ -178,12 +189,16 @@ class Toolbox:
         p, s = result.params, result.stderr
         g = p["g"] if use_measured_g else models.G
         distance = models.landing_distance(p["vx"], height_m, p["vy"], g)
-        # First-order uncertainty from vx only; vy and g errors are smaller for a short roll-off.
+        # First-order fit uncertainty from vx only; vy and g errors are smaller for a short roll-off.
         sigma = abs(distance / p["vx"]) * s["vx"] if p["vx"] else float("nan")
+        # A scale off by k stretches vx, vy and a measured g by k; the height is measured, not read off the video.
+        k = 1 + self.scale_rel_err
+        shifted = models.landing_distance(k * p["vx"], height_m, k * p["vy"], k * g if use_measured_g else g)
         return {
             "fit_id": fit_id,
             "landing_distance_m": round(float(distance), 4),
-            "uncertainty_m": _num(sigma, 4),
+            "uncertainty_m": _num(float(np.hypot(sigma, shifted - distance)), 4),
+            "fit_uncertainty_m": _num(sigma, 4),
             "flight_time_s": round(float(models.landing_time(height_m, p["vy"], g)), 4),
             "g_used": round(float(g), 4),
         }
