@@ -20,6 +20,7 @@ import urllib.request
 import warnings
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Literal
 
 from .base import Message, Reply
 
@@ -285,7 +286,7 @@ class MetaClient:
         cost = (tokens[0] * price_in + tokens[1] * price_out) / 1_000_000
         self._log_row(tokens, cost, "estimated" if estimated else "measured")
 
-    def _log_row(self, tokens: tuple[int, int], cost: float, how: str) -> None:
+    def _log_row(self, tokens: tuple[int, int], cost: float, how: Literal["measured", "estimated"]) -> None:
         new = not self.cost_log.is_file()
         self.cost_log.parent.mkdir(parents=True, exist_ok=True)
         with self.cost_log.open("a", newline="") as f:
@@ -378,9 +379,9 @@ class MetaClient:
             except Exception as exc:  # anything else may quote the Authorization header
                 raise LLMTransportError(f"request failed: {self._redact(f'{type(exc).__name__}: {exc}')}") from None
             else:
-                snippet = self._redact(raw.decode("utf-8", "replace"))[:300]
                 if status == 200:
                     return raw
+                snippet = self._redact(raw.decode("utf-8", "replace"))[:300]
                 if status in (401, 403):
                     raise LLMAuthError(f"HTTP {status}: check MODEL_API_KEY and model access ({snippet})")
                 if status not in RETRY_STATUSES and status < 500:

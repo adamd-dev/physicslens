@@ -76,6 +76,8 @@ def parse_args(argv=None):
     args = p.parse_args(argv)
     if args.transcript and not args.agent:
         p.error("--transcript needs --agent")
+    if args.tracker != "sam" and (args.sam_box or args.sam_prompt != "ball"):
+        p.error("--sam-box and --sam-prompt need --tracker sam")
     if args.agent and args.json:
         p.error("--json is not supported with --agent yet")
     if args.agent and args.model != "auto":

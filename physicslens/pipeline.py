@@ -9,11 +9,11 @@ import numpy as np
 from .agent.tools import Toolbox, TrackData
 from .calibrate import Calibration
 from .ingest import Video, load_video
-from .llm.meta_client import LLMError
+from .llm.meta_client import BudgetExceededError, LLMAuthError, LLMConfigError, LLMError
 from .track.base import Track
 from .track.color import track_color
 from .track.motion import field_order, track_motion
-from .track.sam import Segmenter, track_sam
+from .track.sam import SamTrackError, Segmenter, track_sam
 
 FITS = {"free_fall": "fit_free_fall", "projectile": "fit_projectile", "pendulum": "fit_pendulum"}
 MIN_VX = 0.1  # m/s; slower horizontal drift is camera tilt or tracking noise, not a throw
@@ -42,9 +42,21 @@ class TrackSettings:
 
 
 def _sam_client() -> Segmenter:
-    from .llm.sam_client import SamClient
+    from .llm.sam_client import (
+        SamClient,  # lazy: color/motion runs never touch the API client
+    )
 
     return SamClient.from_env()
+
+
+def _sam_note(exc: Exception) -> str:
+    if isinstance(exc, BudgetExceededError):
+        why = f"the API budget is used up ({exc}); raise PHYSICSLENS_MAX_USD to continue"
+    elif isinstance(exc, (LLMConfigError, LLMAuthError)):
+        why = f"it is not configured ({exc})"
+    else:
+        why = str(exc)
+    return f"SAM 3.1 could not track: {why}. Used the motion tracker instead"
 
 
 def load(
@@ -67,8 +79,8 @@ def track(video: Video, s: TrackSettings, sam: Callable[[], Segmenter] = _sam_cl
         try:
             prompt = None if s.sam_box else s.sam_prompt
             return "none", track_sam(video, sam(), box=s.sam_box, prompt=prompt, roi=s.roi), []
-        except (LLMError, ValueError, OSError) as exc:
-            note = f"SAM 3.1 could not track ({exc}); used the motion tracker instead"
+        except (LLMError, SamTrackError, OSError) as exc:
+            note = _sam_note(exc)
             try:
                 fields, tr, _ = track(video, replace(s, tracker="motion"))
             except ValueError as motion_exc:

@@ -209,7 +209,13 @@ export default function App() {
               )}
             </div>
 
-            {error && <div role="alert" className="rise rounded-xl border border-rose-500/40 bg-rose-500/10 p-4 text-sm text-rose-200">{error}</div>}
+            {error && (
+              <div role="alert" className="rise rounded-xl border border-rose-500/40 bg-rose-500/10 p-4 text-sm text-rose-200">
+                {error}
+                {/* The API may have been paid for before the run failed: say so. */}
+                {cost != null && cost > 0 && !result && <div className="mt-1 font-mono text-rose-300/80">API cost of this run: ${cost.toFixed(3)}</div>}
+              </div>
+            )}
             {warnings.map((w, i) => (
               <div key={`${i}-${w}`} className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-3 text-sm text-amber-200">
                 {w}
