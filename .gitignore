@@ -12,3 +12,4 @@ samples/tracker/
 *.egg-info/
 .env.*
 !.env.example
+runs/

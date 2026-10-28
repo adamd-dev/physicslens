@@ -9,7 +9,9 @@ error wins. This deterministic baseline is what the agent loop must beat.
 """
 
 import argparse
+import dataclasses
 import json
+import os
 import sys
 import warnings
 
@@ -57,7 +59,10 @@ def parse_args(argv=None):
     p.add_argument("--plot", help="save trajectory and residual plot to this PNG")
     p.add_argument("--json", action="store_true", help="print the full result as JSON")
     p.add_argument("--agent", action="store_true", help="let the Muse agent choose, check and report (needs MODEL_API_KEY)")
+    p.add_argument("--transcript", help="save the agent's messages and tool calls to this JSON file")
     args = p.parse_args(argv)
+    if args.transcript and not args.agent:
+        p.error("--transcript needs --agent")
     if args.agent and args.json:
         p.error("--json is not supported with --agent yet")
     if args.agent and args.model != "auto":
@@ -82,6 +87,15 @@ def report_agent(args, data: TrackData, box: Toolbox, video_warnings) -> int:
     except (LLMError, OSError, ValueError) as exc:
         print(f"agent failed: {exc}", file=sys.stderr)
         return 3
+    if args.transcript:
+        # Saved before the verdict: a run with no accepted answer is the one worth reading.
+        try:
+            text = json.dumps([dataclasses.asdict(m) for m in result.transcript], indent=2, ensure_ascii=False, default=str)
+            # Owner-only: prompts and tool output stay on this machine's account.
+            with os.fdopen(os.open(args.transcript, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w", encoding="utf-8") as fh:
+                fh.write(text)
+        except (OSError, TypeError, ValueError) as exc:
+            print(f"  warning: transcript not saved: {exc}", file=sys.stderr)
     if result.fit_id is None:
         print(f"agent gave no accepted answer after {result.steps} steps: {result.summary}", file=sys.stderr)
         return 4
