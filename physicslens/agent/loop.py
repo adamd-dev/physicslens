@@ -24,7 +24,8 @@ problems: try another model. Trim the time window only to drop a few bad samples
 or end (occlusion, a hand in frame), never just to make a check pass.
 - Trimming cannot fix a wrong model: a window with under 80% of the points, or one where the \
 full track fails the same model, is flagged. Prefer the full-track fit and explain its flag.
-- Report values with their uncertainty. Never invent numbers that no tool returned.
+- Report values with their uncertainty: use stderr_total (fit noise plus the scale reading), \
+not stderr alone. Never invent numbers that no tool returned.
 - Finish with final_answer. Use accept_flagged only if the remaining problem is understood \
 (e.g. perspective curvature) and say so in the summary.
 - If no fit can be trusted (too few points, the wrong object tracked), call final_answer \
