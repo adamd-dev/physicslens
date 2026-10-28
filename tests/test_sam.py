@@ -248,3 +248,118 @@ def test_network_failure_gives_up(tmp_path):
     sam, _ = client(tmp_path, OSError("down"), OSError("down"), OSError("down"))
     with pytest.raises(LLMTransportError):
         sam.segment(b"x", "ball")
+
+
+# --- wiring: pipeline, API, CLI ----------------------------------------------------------
+
+
+def drop_text(n_frames=27, capture_fps=60, hold_frames=0):
+    """What SAM would answer for tests.test_robustness.write_drop: the ball's box in every frame."""
+    from physicslens.physics import models
+    from tests.test_robustness import PX_PER_M
+
+    lines = []
+    for i in range(n_frames):
+        y = 50 + PX_PER_M * models.free_fall(max(i - hold_frames, 0) / capture_fps, 0, 0, models.G)
+        lines.append(f"<{i}f>{box(1, 308, round(y) - 12, 332, round(y) + 12)}")
+    return "\n".join(lines)
+
+
+def drop_video(tmp_path):
+    from tests.test_robustness import write_drop
+
+    path = tmp_path / "drop.avi"
+    write_drop(path, capture_fps=60, playback_fps=60, n_frames=27)
+    return path
+
+
+def test_pipeline_tracks_with_sam(tmp_path):
+    from physicslens.pipeline import TrackSettings, track
+
+    video = load_video(str(drop_video(tmp_path)))
+    sam = FakeSam(drop_text())
+    fields, tr, notes = track(video, TrackSettings("sam", sam_box=(300, 30, 340, 70)), sam=lambda: sam)
+    assert (fields, tr.source, notes) == ("none", "sam", []) and len(tr) == 27
+    assert sam.calls[0][1].startswith("<0f>1<|box;x1=300;y1=30;")
+
+
+def test_pipeline_uses_the_text_prompt_without_a_box(tmp_path):
+    from physicslens.pipeline import TrackSettings, track
+
+    sam = FakeSam(drop_text())
+    track(load_video(str(drop_video(tmp_path))), TrackSettings("sam", sam_prompt="red ball"), sam=lambda: sam)
+    assert sam.calls[0][1] == "red ball"
+
+
+@pytest.mark.parametrize("failure", [LLMTransportError("gave up after 3 attempts"), None])
+def test_sam_failure_falls_back_to_motion_and_says_so(tmp_path, failure):
+    from physicslens.pipeline import TrackSettings, track
+
+    def make():
+        if failure:
+            raise failure
+        return FakeSam("")  # SAM answers but finds nothing
+
+    _, tr, notes = track(load_video(str(drop_video(tmp_path))), TrackSettings("sam", sam_prompt="ball"), sam=make)
+    assert tr.source == "motion" and len(tr) > 20
+    assert len(notes) == 1 and "SAM 3.1" in notes[0] and "motion tracker" in notes[0]
+
+
+def test_api_tracks_with_sam_and_reports_the_tracker(tmp_path, monkeypatch):
+    from physicslens import server
+    from physicslens.physics import models
+    from tests.test_server import analyze, upload_drop
+
+    monkeypatch.setattr(server, "UPLOADS", tmp_path / "uploads")
+    monkeypatch.setattr(server, "COSTS", tmp_path / "costs.csv")
+    sam = FakeSam(drop_text())
+    monkeypatch.setattr(server, "make_sam_client", lambda: sam)
+    from fastapi.testclient import TestClient
+
+    api = TestClient(server.app)
+    stream = analyze(api, upload_drop(api, tmp_path), settings={"tracker": "sam", "sam_box": [300, 30, 340, 70]})
+    track = dict(stream)["track"]
+    assert track["source"] == "sam" and track["notes"] == []
+    assert dict(stream)["result"]["params"]["g"] == pytest.approx(models.G, rel=0.02)
+
+
+def test_api_sam_fallback_is_visible(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from physicslens import server
+    from physicslens.llm.meta_client import LLMConfigError
+    from tests.test_server import analyze, upload_drop
+
+    monkeypatch.setattr(server, "UPLOADS", tmp_path / "uploads")
+    monkeypatch.setattr(server, "COSTS", tmp_path / "costs.csv")
+
+    def no_key():
+        raise LLMConfigError("MODEL_API_KEY is not set")
+
+    monkeypatch.setattr(server, "make_sam_client", no_key)
+    api = TestClient(server.app)
+    stream = analyze(api, upload_drop(api, tmp_path), settings={"tracker": "sam"})
+    track = dict(stream)["track"]
+    assert track["source"] == "motion" and "MODEL_API_KEY is not set" in track["notes"][0]
+
+
+def test_api_rejects_an_overlong_prompt(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from physicslens import server
+    from tests.test_server import upload_drop
+
+    monkeypatch.setattr(server, "UPLOADS", tmp_path / "uploads")
+    api = TestClient(server.app)
+    body = {"video_id": upload_drop(api, tmp_path), "scale": {"px_per_m": 400}, "settings": {"tracker": "sam", "sam_prompt": "x" * 500}}
+    assert api.post("/api/analyze", json=body).status_code == 422
+
+
+def test_cli_tracks_with_sam(tmp_path, monkeypatch, capsys):
+    import cli
+    from tests.test_robustness import PX_PER_M
+
+    monkeypatch.setattr(cli, "make_sam_client", lambda: FakeSam(drop_text()))
+    code = cli.main([str(drop_video(tmp_path)), "--px-per-m", str(PX_PER_M), "--tracker", "sam", "--sam-box", "300,30,340,70"])
+    out = capsys.readouterr().out
+    assert code == 0 and "tracker sam" in out
