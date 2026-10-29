@@ -176,8 +176,8 @@ class Settings(BaseModel):
             raise ValueError("sam_box must be x0,y0,x1,y1 with x0 < x1 and y0 < y1")
         return box
 
-    def scaled(self, s: float) -> TrackSettings:
-        """The same settings in decoded pixels, after the frames were shrunk by `s`."""
+    def scaled(self, s: float, px_per_m: float | None = None) -> TrackSettings:
+        """The same settings in decoded pixels, after the frames were shrunk by `s`; `px_per_m` in source pixels."""
         return TrackSettings(
             tracker=self.tracker, hsv_lower=self.hsv_lower, hsv_upper=self.hsv_upper, fields=self.fields,
             roi=_scale_box(self.roi, s),
@@ -186,6 +186,7 @@ class Settings(BaseModel):
             max_jump=self.max_jump * s if self.max_jump else None,
             sam_box=_scale_box(self.sam_box, s),
             sam_prompt=self.sam_prompt,
+            px_per_m=px_per_m * s if px_per_m else None,
         )
 
 
@@ -286,7 +287,7 @@ def _analyze(req: AnalyzeRequest, emit) -> None:
     before = _spent()
     emit("status", {"stage": "tracking"})
     try:
-        fields, tr, track_notes = track(video, req.settings.scaled(s), sam=lambda: make_sam_client())
+        fields, tr, track_notes = track(video, req.settings.scaled(s, calibration.px_per_m), sam=lambda: make_sam_client())
     except ValueError as exc:
         emit("error", {"stage": "tracking", "message": str(exc)})
         return

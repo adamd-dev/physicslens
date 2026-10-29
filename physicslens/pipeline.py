@@ -40,6 +40,7 @@ class TrackSettings:
     max_jump: float | None = None
     sam_box: tuple[int, int, int, int] | None = None  # around the object on the first frame; wins over the prompt
     sam_prompt: str | None = None  # explicit opt-in: text prompts miss small balls (tested 2026-10-29)
+    px_per_m: float | None = None  # in decoded pixels; gives the motion tracker its default jump limit
 
 
 def _sam_client() -> Segmenter:
@@ -48,6 +49,10 @@ def _sam_client() -> Segmenter:
     )
 
     return SamClient.from_env()
+
+
+# A 10 m fall ends at 14 m/s: a blob that moved faster than this between two samples is another object.
+MAX_SPEED_M_S = 15.0
 
 
 NO_BALL_BOX = "SAM needs to know which object is the ball: draw a box around the ball on the first frame"
@@ -117,9 +122,12 @@ def track(
         return "none", track_color(video, s.hsv_lower, s.hsv_upper, s.min_area, s.max_jump, max_area=s.max_area, roi=s.roi), []
     kw: dict[str, Any] = {"min_area": s.min_area, "max_area": s.max_area or MOTION_MAX_AREA, "max_jump_px": s.max_jump, "roi": s.roi,
                           **_start(start_box)}
+    if s.max_jump is None and s.px_per_m:
+        kw["max_speed_px_s"] = MAX_SPEED_M_S * s.px_per_m
     if s.fields == "auto":
         return (*field_order(video, **kw), [])
     return s.fields, track_motion(video, fields=None if s.fields == "none" else s.fields, **kw), []
+
 
 
 def _still_run(t: np.ndarray, x: np.ndarray, y: np.ndarray, radius_px: float) -> int:

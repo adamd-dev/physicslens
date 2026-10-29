@@ -23,6 +23,8 @@ def _sized_blobs(mask: np.ndarray, min_area: int, max_area: int) -> np.ndarray:
 # Pixels "moving" in more than this share of frames are compression flicker on static
 # edges (e.g. metre-stick ticks); a real moving object covers any pixel only briefly.
 FLICKER_SHARE = 0.3
+# Centroid jitter (partial masks, compression) a speed limit must allow even between close samples.
+JITTER_PX = 4.0
 
 
 def _samples(video: Video, fields: str | None, threshold: int):
@@ -52,12 +54,15 @@ def track_motion(
     roi: tuple[int, int, int, int] | None = None,
     start: tuple[float, float] | None = None,
     start_radius: float | None = None,
+    max_speed_px_s: float | None = None,
 ) -> Track:
     """Track the moving object. `fields` is None, "top" or "bottom" (which field comes first).
 
     `roi` = (x0, y0, x1, y1) in full-frame pixels keeps hands and people out of the search.
     `start` = (x, y) where the ball is on the first frame: the track begins with the first blob
     within `start_radius` of it, not with the biggest mover (a hand, a head).
+    `max_speed_px_s`, when `max_jump_px` is not given, splits the track where the blob would have moved
+    faster than that: a longer gap allows a longer step, so a ball hidden for a while is not cut off.
     """
     if fields not in (None, "top", "bottom"):
         raise ValueError("fields must be None, 'top' or 'bottom'")
@@ -88,21 +93,23 @@ def track_motion(
         xs.append(previous[0])
         ys.append(previous[1])
     t_arr, x_arr, y_arr = np.array(ts), np.array(xs), np.array(ys)
-    if max_jump_px is not None and len(t_arr) > 1:
-        t_arr, x_arr, y_arr = _longest_segment(t_arr, x_arr, y_arr, max_jump_px, max_gap_s=3.5 / video.fps)
+    if len(t_arr) > 1 and max_jump_px is not None:
+        breaks = (np.hypot(np.diff(x_arr), np.diff(y_arr)) > max_jump_px) | (np.diff(t_arr) > 3.5 / video.fps)
+        t_arr, x_arr, y_arr = _longest_segment(t_arr, x_arr, y_arr, breaks)
+    elif len(t_arr) > 1 and max_speed_px_s is not None:
+        t_arr, x_arr, y_arr = _longest_segment(t_arr, x_arr, y_arr, np.hypot(np.diff(x_arr), np.diff(y_arr)) > max_speed_px_s * np.diff(t_arr) + JITTER_PX)
     if len(t_arr) < MIN_POINTS:
         raise ValueError(f"moving object found in only {len(t_arr)} samples; adjust threshold or area limits")
     return Track(t_arr, x_arr, y_arr, source="motion" if fields is None else f"motion-{fields}")
 
 
-def _longest_segment(ts, xs, ys, max_jump_px: float, max_gap_s: float):
-    """Keep the longest run without a position jump or time gap.
+def _longest_segment(ts, xs, ys, breaks: np.ndarray):
+    """Keep the longest run without a break (a position jump, a time gap) between neighbours.
 
     Rejecting points one by one can lock onto a wrong early blob (a hand, a
     flickering edge); splitting and keeping the longest run lets the real
     trajectory win by length.
     """
-    breaks = (np.hypot(np.diff(xs), np.diff(ys)) > max_jump_px) | (np.diff(ts) > max_gap_s)
     starts = np.r_[0, np.flatnonzero(breaks) + 1]
     ends = np.r_[starts[1:], len(ts)]
     k = int(np.argmax(ends - starts))

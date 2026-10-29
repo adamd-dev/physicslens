@@ -87,7 +87,7 @@ export default function SettingsPanel({ settings, options, onSettings, onOptions
         <div className="grid grid-cols-2 gap-3">
           <Num label="Min area (px)" value={settings.min_area} onChange={(v) => set({ min_area: v ?? 1 })} />
           <Num label="Max area (px)" value={settings.max_area} placeholder="auto" onChange={(max_area) => set({ max_area })} />
-          <Num label="Max jump (px)" value={settings.max_jump} placeholder="off" onChange={(max_jump) => set({ max_jump })} />
+          <Num label="Max jump (px)" value={settings.max_jump} placeholder={settings.tracker === "color" ? "off" : "auto"} onChange={(max_jump) => set({ max_jump })} />
           <Select label="Interlaced fields" value={settings.fields} options={[["none", "No"], ["auto", "Auto"], ["top", "Top"], ["bottom", "Bottom"]]} onChange={(fields) => set({ fields })} />
           <Num label="Start (s)" value={options.start} step={0.1} onChange={(v) => opt({ start: v ?? 0 })} />
           <Num label="End (s)" value={options.end} step={0.1} placeholder="end" onChange={(end) => opt({ end })} />

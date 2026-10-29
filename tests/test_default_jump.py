@@ -5,18 +5,19 @@ import numpy as np
 import pytest
 
 import cli
-from physicslens import pipeline, server
+from physicslens import server
 from physicslens.ingest import load_video
 from physicslens.physics import models
 from physicslens.pipeline import TrackSettings, track
-from tests.test_robustness import PX_PER_M
+from tests.test_robustness import PX_PER_M, write_drop
 from tests.test_server import analyze, client  # noqa: F401  (client is a fixture)
 
 
-def drop_after_a_passer_by(path, n_frames=27, fps=60, passer_frames=5):
+def drop_after_a_passer_by(path, n_frames=27, fps=60, passer_frames=5, hidden=()):
     """A big blob crosses the bottom left for the first frames, then only the ball (x=320) moves.
 
     Without a limit the track starts on the passer-by and then jumps about 400 px to the ball.
+    hidden: frames where the ball is not drawn.
     """
     writer = cv2.VideoWriter(str(path), cv2.VideoWriter_fourcc(*"MJPG"), fps, (640, 480))
     for i in range(n_frames):
@@ -24,7 +25,8 @@ def drop_after_a_passer_by(path, n_frames=27, fps=60, passer_frames=5):
         if i < passer_frames:
             cv2.circle(frame, (40 + 25 * i, 420), 22, (255, 255, 255), -1)
         y_px = 50 + PX_PER_M * models.free_fall(i / fps, 0, 0, models.G)
-        cv2.circle(frame, (320, round(y_px)), 12, (255, 255, 255), -1)
+        if i not in hidden:
+            cv2.circle(frame, (320, round(y_px)), 12, (255, 255, 255), -1)
         writer.write(frame)
     writer.release()
     return str(path)
@@ -43,22 +45,23 @@ def test_the_scale_gives_a_default_limit_that_drops_the_passer_by(tmp_path, fiel
     assert np.all(np.abs(tr.x - 320) < 5) and len(tr) >= 20
 
 
-def test_the_default_limit_follows_the_speed_and_the_sample_rate():
-    # 60 fps, 300 px/m: a sample apart, MAX_SPEED_M_S covers this many pixels.
-    assert pipeline.default_max_jump(PX_PER_M, 60.0, fields=False) == pytest.approx(pipeline.MAX_SPEED_M_S * PX_PER_M / 60)
-    assert pipeline.default_max_jump(PX_PER_M, 60.0, fields=True) == pytest.approx(pipeline.MAX_SPEED_M_S * PX_PER_M / 120)
-
-
-def test_a_real_fall_is_never_cut_by_the_default():
-    # A 3 m drop ends at about 7.7 m/s: well inside the limit even at 30 fps.
-    v = np.sqrt(2 * models.G * 3.0)
-    assert v * PX_PER_M / 30 < pipeline.default_max_jump(PX_PER_M, 30.0, fields=False)
+def test_the_default_drops_the_passer_by_and_keeps_a_ball_hidden_for_a_while(tmp_path):
+    # Hidden for 6 frames (behind a hand, out of the light): a speed limit, unlike a fixed jump
+    # and gap limit, allows the longer step after the gap and keeps both parts of the fall.
+    video = load_video(drop_after_a_passer_by(tmp_path / "h.avi", hidden=range(10, 16)))
+    _, tr, _ = track(video, TrackSettings("motion", px_per_m=PX_PER_M))
+    # Frames 0-4 follow the passer-by and are dropped; the ball run is frames 5-9 and 16-26, across the gap.
+    assert np.all(np.abs(tr.x - 320) < 5) and len(tr) == 16
 
 
 def test_an_explicit_max_jump_wins_over_the_default(tmp_path):
-    video = load_video(drop_after_a_passer_by(tmp_path / "p.avi"))
-    _, tr, _ = track(video, TrackSettings("motion", max_jump=10_000, px_per_m=PX_PER_M))
-    assert tr.x.min() < 200
+    # The explicit limit keeps its time-gap rule, so it cuts the hidden fall where the default does not.
+    path = tmp_path / "hidden.avi"
+    write_drop(path, capture_fps=60, playback_fps=60, n_frames=27, hidden=range(10, 16))
+    video = load_video(str(path))
+    _, by_default, _ = track(video, TrackSettings("motion", px_per_m=PX_PER_M))
+    _, explicit, _ = track(video, TrackSettings("motion", max_jump=10_000, px_per_m=PX_PER_M))
+    assert (len(by_default), len(explicit)) == (21, 11)
 
 
 def test_the_api_passes_the_scale_in_decoded_pixels():
