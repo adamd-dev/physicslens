@@ -13,6 +13,12 @@ Durable decisions and hard-won facts that the code and git history do not explai
 - Confirmed by real runs 2026-10-28: Muse sends tool `arguments` as a JSON string, often several tool calls per turn, and empty text content on the final turn. A run costs about $0.01 to $0.03 (4 to 12 steps).
 - python.org Python 3.13 on macOS ships without root certificates (`CERTIFICATE_VERIFY_FAILED`). Fixed by running `/Applications/Python 3.13/Install Certificates.command`.
 - SAM 3.1: model `sam-3.1` via Responses streaming; text prompt (e.g. "ball") or box/point tokens, not both. One text line per frame with boxes in source pixels and base85 masks. Frames can be missing or out of order; object ids are not dense. $0.20 per 1000 frames, 50-frame minimum per request. Tested 2026-10-28: a text prompt ("ball", "pendulum bob") found nothing on the sample clips; a box prompt on frame 0 tracks well (BallDrop g 9.65, Commons pendulum L 0.590). The box is the main mode. `usage.video_frames_processed` is the billed count (minimum 50), not the decoded count.
+- Probes 2026-10-29 (BallDrop, total spend about $0.058):
+  - Muse Spark vision works. `muse-spark-1.3` on `chat/completions` accepts an OpenAI-style content list: `{"type":"text"}` plus `{"type":"image_url","image_url":{"url":"data:image/jpeg;base64,..."}}`. Asked for a JSON ball box on frame 0, it answered `186,37,202,52`, then `185,38,203,54` (true box `194,40,209,55`: about 8 px left, partly off the ball). It used about 435 prompt tokens and 770 completion tokens (mostly reasoning), so about $0.004 per call.
+  - SAM from Muse's box tracks the ball: 18 frames, g = 9.655 (hand box: 9.653). A loose box is enough.
+  - A SAM box on a later frame works: `<8f>1<|box;...|>` with `propagation_direction` "both" tracks frames 0..17. An auto-detected box need not be on frame 0.
+  - The text prompts "small white ball", "ping pong ball" and "white sphere" found nothing, so text prompts are dead for small balls.
+- Dropped-ball accuracy (2026-10-29): px/m is right (10 ticks = 400.4 px). Ruled out: 29.97 fps, air drag (acceleration rises during the fall), a tick-based nonlinear scale (makes g worse), and outliers. Motion with fields gives 9.728 (-0.8%); SAM gives 9.653 (box edges are whole pixels, half the samples). The remaining bias is depth: the ball and the stick are in different planes. For filming: drop the ball in the ruler's plane.
 
 ## Real-video lessons
 - Samsung slow motion (A37: 720p 240 fps) plays back at 30 fps: pass `--capture-fps 240` or g comes out 64x too small.
