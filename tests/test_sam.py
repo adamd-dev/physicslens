@@ -396,9 +396,9 @@ def test_sam_failure_falls_back_to_motion_and_says_so(tmp_path, failure):
             raise failure
         return FakeSam("")  # SAM answers but finds nothing
 
-    _, tr, notes = track(load_video(str(drop_video(tmp_path))), TrackSettings("sam", sam_prompt="ball"), sam=make)
+    _, tr, notes = track(load_video(str(drop_video(tmp_path))), TrackSettings("sam", sam_box=(300, 30, 340, 70)), sam=make)
     assert tr.source == "motion" and len(tr) > 20
-    assert len(notes) == 1 and "SAM 3.1" in notes[0] and "motion tracker" in notes[0]
+    assert len(notes) == 1 and "SAM 3.1" in notes[0] and "motion tracker" in notes[0] and "ball box" in notes[0]
 
 
 def test_budget_fallback_says_it_is_the_budget(tmp_path):
@@ -407,7 +407,7 @@ def test_budget_fallback_says_it_is_the_budget(tmp_path):
     def make():
         raise BudgetExceededError("logged spend $12.0000 reached the $12.00 limit")
 
-    _, tr, notes = track(load_video(str(drop_video(tmp_path))), TrackSettings("sam"), sam=make)
+    _, tr, notes = track(load_video(str(drop_video(tmp_path))), TrackSettings("sam", sam_box=(300, 30, 340, 70)), sam=make)
     assert tr.source == "motion" and "budget" in notes[0] and "PHYSICSLENS_MAX_USD" in notes[0]
 
 
@@ -444,7 +444,7 @@ def test_api_sam_fallback_is_visible(tmp_path, monkeypatch):
 
     monkeypatch.setattr(server, "make_sam_client", no_key)
     api = TestClient(server.app)
-    stream = analyze(api, upload_drop(api, tmp_path), settings={"tracker": "sam"})
+    stream = analyze(api, upload_drop(api, tmp_path), settings={"tracker": "sam", "sam_box": [300, 30, 340, 70]})
     track = dict(stream)["track"]
     assert track["source"] == "motion" and "MODEL_API_KEY is not set" in track["notes"][0]
 

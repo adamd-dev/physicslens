@@ -28,7 +28,6 @@ export interface Settings {
   max_area: number | null;
   max_jump: number | null;
   sam_box: [number, number, number, number] | null; // around the ball on the first frame, source pixels
-  sam_prompt: string; // what SAM looks for when there is no box
 }
 
 export interface AnalyzeRequest {

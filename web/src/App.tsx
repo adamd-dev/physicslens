@@ -19,7 +19,6 @@ const DEFAULT_SETTINGS: Settings = {
   max_area: null,
   max_jump: null,
   sam_box: null,
-  sam_prompt: "ball",
 };
 const DEFAULT_OPTIONS: Options = { start: 0, end: null, capture_fps: null, model: "auto", axis: "x", agent: true, height_m: null, detect_release: true };
 const TRACKERS: Record<string, string> = { motion: "motion", color: "color", sam: "SAM 3.1" };
@@ -198,7 +197,7 @@ export default function App() {
               <SettingsPanel settings={settings} options={options} onSettings={setSettings} onOptions={setOptions} />
               <button
                 className="btn min-h-10 w-full bg-gradient-to-r from-cyan-400 to-violet-500 text-base font-semibold text-slate-950 hover:brightness-110"
-                disabled={!calibrated || running}
+                disabled={!calibrated || (sam && !ballBox) || running}
                 aria-busy={running}
                 onClick={run}
               >
@@ -260,7 +259,7 @@ function Checklist({ calibrated, roi, ballBox }: { calibrated: boolean; roi: boo
     <ul className="space-y-2 text-sm">
       {item(true, "Video loaded")}
       {item(calibrated, "Scale: click both ends of a ruler")}
-      {ballBox !== null && item(ballBox, "Ball box for SAM on the first frame", true)}
+      {ballBox !== null && item(ballBox, "Ball: box it on the first frame (SAM needs it)")}
       {item(roi, "Search area around the ball", true)}
     </ul>
   );

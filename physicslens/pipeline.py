@@ -39,7 +39,7 @@ class TrackSettings:
     max_area: int | None = None  # None: MOTION_MAX_AREA for motion, no limit for color
     max_jump: float | None = None
     sam_box: tuple[int, int, int, int] | None = None  # around the object on the first frame; wins over the prompt
-    sam_prompt: str = "ball"
+    sam_prompt: str | None = None  # explicit opt-in: text prompts miss small balls (tested 2026-10-29)
 
 
 def _sam_client() -> Segmenter:
@@ -50,14 +50,32 @@ def _sam_client() -> Segmenter:
     return SamClient.from_env()
 
 
-def _sam_note(exc: Exception) -> str:
+NO_BALL_BOX = "SAM needs to know which object is the ball: draw a box around the ball on the first frame"
+START_RADIUS_BOXES = 3  # the motion fallback accepts its first blob within this many box sizes of the box
+MIN_START_RADIUS_PX = 30
+
+
+def _sam_why(exc: Exception) -> str:
     if isinstance(exc, BudgetExceededError):
         why = f"the API budget is used up ({exc}); raise PHYSICSLENS_MAX_USD to continue"
     elif isinstance(exc, (LLMConfigError, LLMAuthError)):
         why = f"it is not configured ({exc})"
     else:
         why = str(exc)
-    return f"SAM 3.1 could not track: {why}. Used the motion tracker instead"
+    return f"SAM 3.1 could not track: {why}"
+
+
+def _sam_note(exc: Exception) -> str:
+    return f"{_sam_why(exc)}. Used the motion tracker instead, starting at the ball box"
+
+
+def _start(box: tuple[int, int, int, int] | None) -> dict[str, Any]:
+    """Motion tracker arguments that begin the track at the ball box instead of at the biggest mover."""
+    if box is None:
+        return {}
+    x0, y0, x1, y1 = box
+    radius = max(MIN_START_RADIUS_PX, START_RADIUS_BOXES * max(x1 - x0, y1 - y0))
+    return {"start": ((x0 + x1) / 2, (y0 + y1) / 2), "start_radius": radius}
 
 
 def load(
@@ -70,26 +88,35 @@ def load(
     return video, [str(w.message) for w in caught]
 
 
-def track(video: Video, s: TrackSettings, sam: Callable[[], Segmenter] = _sam_client) -> tuple[str, Track, list[str]]:
+def track(
+    video: Video, s: TrackSettings, sam: Callable[[], Segmenter] = _sam_client, start_box: tuple[int, int, int, int] | None = None
+) -> tuple[str, Track, list[str]]:
     """Returns (field mode used, track in pixels, notes); raises ValueError when the object is not found.
 
-    When SAM 3.1 cannot track (no key, API error, budget, nothing found) the motion tracker takes over
-    and a note says why: the result is never silently from another tracker.
+    SAM needs a ball box (or an explicit text prompt); without one it is not called at all.
+    When SAM 3.1 cannot track a boxed ball (no key, API error, budget, nothing found) the motion
+    tracker takes over from the box and a note says why: the result is never silently from another
+    tracker. A failed text prompt has no box to start from, so it is an error, not a blind fallback.
     """
     if s.tracker == "sam":
+        if s.sam_box is None and not s.sam_prompt:
+            raise ValueError(NO_BALL_BOX)
         try:
             prompt = None if s.sam_box else s.sam_prompt
             return "none", track_sam(video, sam(), box=s.sam_box, prompt=prompt, roi=s.roi), []
         except (LLMError, SamTrackError, OSError) as exc:
+            if s.sam_box is None:
+                raise ValueError(f"{_sam_why(exc)}. {NO_BALL_BOX}") from exc
             note = _sam_note(exc)
             try:
-                fields, tr, _ = track(video, replace(s, tracker="motion"))
+                fields, tr, _ = track(video, replace(s, tracker="motion"), start_box=s.sam_box)
             except ValueError as motion_exc:
                 raise ValueError(f"{motion_exc} ({note})") from exc
             return fields, tr, [note]
     if s.tracker == "color":
         return "none", track_color(video, s.hsv_lower, s.hsv_upper, s.min_area, s.max_jump, max_area=s.max_area, roi=s.roi), []
-    kw: dict[str, Any] = {"min_area": s.min_area, "max_area": s.max_area or MOTION_MAX_AREA, "max_jump_px": s.max_jump, "roi": s.roi}
+    kw: dict[str, Any] = {"min_area": s.min_area, "max_area": s.max_area or MOTION_MAX_AREA, "max_jump_px": s.max_jump, "roi": s.roi,
+                          **_start(start_box)}
     if s.fields == "auto":
         return (*field_order(video, **kw), [])
     return s.fields, track_motion(video, fields=None if s.fields == "none" else s.fields, **kw), []

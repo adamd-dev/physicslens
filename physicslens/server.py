@@ -40,6 +40,7 @@ from .pipeline import (
     track,
     trim_rest,
 )
+from .track.sam import MAX_TEXT_PROMPT, TEXT_PROMPT_PATTERN
 
 UPLOADS = PROJECT_ROOT / "cache" / "uploads"
 WEB_DIST = PROJECT_ROOT / "web" / "dist"
@@ -165,8 +166,8 @@ class Settings(BaseModel):
     max_jump: float | None = Field(None, gt=0)
     # Around the object on the first frame of the window, source pixels.
     sam_box: tuple[Coord, Coord, Coord, Coord] | None = None
-    # A noun phrase only: "<" and "|" would let raw SAM prompt tokens through.
-    sam_prompt: str = Field(default="ball", min_length=1, max_length=80, pattern=r"^[A-Za-z0-9 ,.'-]+$")
+    # Opt-in: text misses small balls.
+    sam_prompt: str | None = Field(default=None, min_length=1, max_length=MAX_TEXT_PROMPT, pattern=TEXT_PROMPT_PATTERN)
 
     @field_validator("sam_box")
     @classmethod

@@ -50,6 +50,11 @@ def encode_clip(video: Video) -> bytes:
         raise SamTrackError(f"could not encode the clip for SAM: {exc}") from None
 
 
+# A noun phrase only: "<" and "|" would let raw SAM prompt tokens through.
+TEXT_PROMPT_PATTERN = r"^[A-Za-z0-9 ,.'-]+$"
+MAX_TEXT_PROMPT = 80
+
+
 def box_prompt(box, width: int, height: int) -> str:
     """Object prompt on frame 0: inclusive integer box in the clip's pixels, clipped to the frame."""
     x1, y1, x2, y2 = (round(v) for v in box)

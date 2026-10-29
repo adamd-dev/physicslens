@@ -12,6 +12,7 @@ import argparse
 import dataclasses
 import json
 import os
+import re
 import sys
 from collections.abc import Sequence
 
@@ -34,6 +35,7 @@ from physicslens.pipeline import (
     track,
     trim_rest,
 )
+from physicslens.track.sam import MAX_TEXT_PROMPT, TEXT_PROMPT_PATTERN
 
 
 def _numbers(text: str, n: int, cast=float):
@@ -53,7 +55,7 @@ def parse_args(argv=None):
                    help="sam: Meta SAM 3.1 over the Model API (needs MODEL_API_KEY), motion tracker if it fails")
     p.add_argument("--sam-box", type=lambda s: _numbers(s, 4, int),
                    help="x0,y0,x1,y1 around the ball on the first frame, full-frame pixels (best for a small ball)")
-    p.add_argument("--sam-prompt", default="ball", help="what SAM looks for when no --sam-box is given")
+    p.add_argument("--sam-prompt", help="what SAM looks for when no --sam-box is given (text often misses a small ball)")
     p.add_argument("--hsv-lower", type=lambda s: _numbers(s, 3, int), default=(0, 0, 200))
     p.add_argument("--hsv-upper", type=lambda s: _numbers(s, 3, int), default=(180, 60, 255))
     p.add_argument("--fields", choices=["none", "auto", "top", "bottom"], default="none", help="interlaced video")
@@ -76,8 +78,10 @@ def parse_args(argv=None):
     args = p.parse_args(argv)
     if args.transcript and not args.agent:
         p.error("--transcript needs --agent")
-    if args.tracker != "sam" and (args.sam_box or args.sam_prompt != "ball"):
+    if args.tracker != "sam" and (args.sam_box or args.sam_prompt is not None):
         p.error("--sam-box and --sam-prompt need --tracker sam")
+    if args.sam_prompt is not None and not (len(args.sam_prompt) <= MAX_TEXT_PROMPT and re.fullmatch(TEXT_PROMPT_PATTERN, args.sam_prompt)):
+        p.error(f"--sam-prompt must be a short noun phrase (letters, digits, spaces, ,.'-; at most {MAX_TEXT_PROMPT} characters)")
     if args.agent and args.json:
         p.error("--json is not supported with --agent yet")
     if args.agent and args.model != "auto":

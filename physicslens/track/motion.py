@@ -50,15 +50,21 @@ def track_motion(
     fields: str | None = None,
     max_jump_px: float | None = None,
     roi: tuple[int, int, int, int] | None = None,
+    start: tuple[float, float] | None = None,
+    start_radius: float | None = None,
 ) -> Track:
     """Track the moving object. `fields` is None, "top" or "bottom" (which field comes first).
 
     `roi` = (x0, y0, x1, y1) in full-frame pixels keeps hands and people out of the search.
+    `start` = (x, y) where the ball is on the first frame: the track begins with the first blob
+    within `start_radius` of it, not with the biggest mover (a hand, a head).
     """
     if fields not in (None, "top", "bottom"):
         raise ValueError("fields must be None, 'top' or 'bottom'")
-    ts, xs, ys = [], [], []
-    previous = None
+    ts: list[float] = []
+    xs: list[float] = []
+    ys: list[float] = []
+    previous = start
     for t, moving, y_scale, y_offset in _samples(video, fields, threshold):
         if roi is not None:
             x0, y0, x1, y1 = roi
@@ -66,6 +72,10 @@ def track_motion(
             rows = slice(max(0, (y0 - y_offset + y_scale - 1) // y_scale), max(0, (y1 - y_offset) // y_scale + 1))
             inside[rows, x0:x1] = 1
             moving &= inside
+        if not ts and start is not None and start_radius is not None:
+            # Until the ball moves, only blobs near the box can be it; whatever moves elsewhere is not.
+            yy, xx = np.ogrid[: moving.shape[0], : moving.shape[1]]
+            moving &= (np.hypot(xx - start[0], yy * y_scale + y_offset - start[1]) <= start_radius).astype(np.uint8)
         # Areas are given in full-frame pixels; a field has half the rows.
         mask = _sized_blobs(moving, min_area / y_scale, max_area / y_scale)
         # Compare in field coordinates so the continuity check uses like with like.
