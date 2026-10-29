@@ -1,10 +1,12 @@
 """A track that no physics model can describe never reaches the agent, and the agent gives up early."""
 
+import itertools
+
 import cv2
 import numpy as np
 
 import cli
-from physicslens import server
+from physicslens import pipeline, server
 from physicslens.agent.loop import NUDGE_STEP, run_agent
 from physicslens.agent.tools import Toolbox, TrackData
 from physicslens.llm.base import MockClient, Reply
@@ -27,8 +29,10 @@ def wandering(n=27, fps=60, seed=3):
 
 
 def falling(n=27, fps=60):
+    """A tracked drop: 0.5 mm of tracking noise, as a real tracker gives."""
     t = np.arange(n) / fps
-    return TrackData(t, np.zeros(n), models.free_fall(t, 0, 0, models.G))
+    noise = np.random.default_rng(1).normal(0, 0.0005, (2, n))
+    return TrackData(t, noise[0], models.free_fall(t, 0, 0, models.G) + noise[1])
 
 
 def wandering_video(path, n_frames=27, fps=60, seed=3):
@@ -68,10 +72,20 @@ def test_slow_motion_without_capture_fps_is_caught_with_a_hint():
     assert why is not None and "frame rate" in why
 
 
-def test_the_gate_leaves_the_toolbox_alone():
-    box = Toolbox(wandering())
-    wrong_object(box.data)
-    assert box.fits == {}  # the agent's fit ids start at fit_1
+def test_a_fit_without_a_finite_g_does_not_crash_the_gate(monkeypatch):
+    # Summaries turn a non-finite g into None; the gate must still answer, and such a fit is no physics.
+    bad = {"name": "free_fall", "fit_id": "fit_1", "r2": 0.95, "params": {"g": None}, "check": {"ok": False, "problems": []}}
+    monkeypatch.setattr(pipeline, "run_fits", lambda *a, **k: [bad])
+    why = wrong_object(falling())
+    assert why is not None and "free_fall R² 0.95)" in why
+
+
+def test_a_swing_along_y_reaches_the_agent():
+    t = np.arange(240) / 60
+    theta = 0.2 * np.cos(np.sqrt(models.G / 0.5) * t)
+    noise = np.random.default_rng(2).normal(0, 0.0005, len(t))
+    data = TrackData(t, np.zeros(len(t)) + noise, 0.5 * np.sin(theta) + noise)  # x and y swapped, as a rotated phone films it
+    assert wrong_object(data) is None
 
 
 def test_api_skips_the_agent_on_the_wrong_object(client, tmp_path, monkeypatch):  # noqa: F811
@@ -106,16 +120,33 @@ def stuck_replies(n):
 
 def test_the_agent_is_told_to_give_up_after_nudge_step_steps():
     give_up = Reply("", [call(99, "final_answer", summary="the track is a wandering hand; box the ball")])
-    client = MockClient([*stuck_replies(NUDGE_STEP), give_up])
-    result = run_agent(client, Toolbox(wandering()))
+    llm = MockClient([*stuck_replies(NUDGE_STEP), give_up])
+    result = run_agent(llm, Toolbox(wandering()))
     assert result.no_measurement and result.steps == NUDGE_STEP + 1
-    nudges = [m for m in client.requests[-1] if m.role == "user" and "final_answer without fit_id" in (m.content or "")]
+    nudges = [m for m in llm.requests[-1] if m.role == "user" and "final_answer without fit_id" in (m.content or "")]
     assert len(nudges) == 1
-    assert not any("final_answer without fit_id" in (m.content or "") for m in client.requests[NUDGE_STEP - 1] if m.role == "user")
+    assert not any("final_answer without fit_id" in (m.content or "") for m in llm.requests[NUDGE_STEP - 1] if m.role == "user")
+
+
+def test_no_nudge_before_any_fit_was_tried():
+    looks = [Reply("", [call(i, "describe_track")]) for i in range(1, NUDGE_STEP + 1)]
+    llm = MockClient([*looks, Reply("", [call(99, "final_answer", summary="the track is a wandering hand; box the ball")])])
+    run_agent(llm, Toolbox(wandering()))
+    assert not any("final_answer without fit_id" in (m.content or "") for m in llm.requests[-1] if m.role == "user")
+
+
+def test_the_nudge_joins_a_pending_user_turn():
+    # A text-only reply at step 6 adds "Continue ..."; the nudge must not make two user turns in a row.
+    llm = MockClient([*stuck_replies(NUDGE_STEP - 1), Reply("thinking", []),
+                      Reply("", [call(99, "final_answer", summary="the track is a wandering hand; box the ball")])])
+    run_agent(llm, Toolbox(wandering()))
+    roles = [m.role for m in llm.requests[-1]]
+    assert not any(a == b == "user" for a, b in itertools.pairwise(roles))
+    assert "final_answer without fit_id" in llm.requests[-1][-1].content
 
 
 def test_no_nudge_while_a_fit_passes():
-    client = MockClient([*stuck_replies(NUDGE_STEP), Reply("", [call(99, "final_answer", fit_id="fit_1", summary="g")])])
-    result = run_agent(client, Toolbox(falling()))
+    llm = MockClient([*stuck_replies(NUDGE_STEP), Reply("", [call(99, "final_answer", fit_id="fit_1", summary="g")])])
+    result = run_agent(llm, Toolbox(falling()))
     assert result.fit_id == "fit_1"
-    assert not any("final_answer without fit_id" in (m.content or "") for m in client.requests[-1] if m.role == "user")
+    assert not any("final_answer without fit_id" in (m.content or "") for m in llm.requests[-1] if m.role == "user")

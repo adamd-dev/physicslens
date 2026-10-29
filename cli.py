@@ -35,6 +35,7 @@ from physicslens.pipeline import (
     to_track_data,
     track,
     trim_rest,
+    wrong_object,
 )
 from physicslens.track.sam import MAX_TEXT_PROMPT, TEXT_PROMPT_PATTERN
 
@@ -104,6 +105,9 @@ def report_agent(args, data: TrackData, box: Toolbox, video_warnings: Sequence[s
     """Exit codes: 0 accepted and plausible, 1 accepted but flagged, 3 setup/API failure, 4 no answer."""
     for w in video_warnings:
         print(f"  warning: {w}", file=sys.stderr)
+    if why := wrong_object(data, box.scale_rel_err):
+        print(f"no measurement possible (agent not called): {why}", file=sys.stderr)
+        return 4
     question = agent_question(args.height, rest_notes)
     try:
         result = run_agent(make_client(), box, question)

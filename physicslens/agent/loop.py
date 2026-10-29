@@ -7,7 +7,7 @@ explains why it is still acceptable, so a wrong number never leaves silently.
 
 import json
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from ..llm.base import LLMClient, Message
 from .tools import TOOL_SCHEMAS, Toolbox, _schema
@@ -40,6 +40,14 @@ FINAL_ANSWER = _schema(
         "accept_flagged": {"type": "boolean", "description": "Report a fit that failed checks, with the reason."},
     },
     ["summary"],
+)
+
+
+# After this many steps with no passing fit the model is told to stop refitting and give up.
+NUDGE_STEP = 6
+NUDGE = (
+    "No fit passes its checks after {steps} steps. Unless one more specific fit fixes a problem you "
+    "understand, call final_answer without fit_id now and say in the summary what the user should change."
 )
 
 
@@ -118,6 +126,15 @@ def run_agent(
     add(Message("user", question or "Measure the physics in this tracked trajectory."))
     tools = TOOL_SCHEMAS + [FINAL_ANSWER]
     for step in range(1, max_steps + 1):
+        if step == NUDGE_STEP + 1 and box.fits and not any(box.check_plausibility(f)["ok"] for f in box.fits):
+            nudge = NUDGE.format(steps=NUDGE_STEP)
+            if messages[-1].role == "user":
+                # Roles must alternate for some providers: extend the pending user turn instead.
+                messages[-1] = replace(messages[-1], content=f"{messages[-1].content} {nudge}")
+                if on_message:
+                    on_message(Message("user", nudge))
+            else:
+                add(Message("user", nudge))
         reply = client.chat(messages, tools)
         add(Message("assistant", reply.content, tool_calls=reply.tool_calls))
         if not reply.tool_calls:

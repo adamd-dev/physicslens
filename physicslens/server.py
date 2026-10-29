@@ -39,6 +39,7 @@ from .pipeline import (
     to_track_data,
     track,
     trim_rest,
+    wrong_object,
 )
 from .track.sam import MAX_TEXT_PROMPT, TEXT_PROMPT_PATTERN
 
@@ -324,6 +325,9 @@ def _analyze(req: AnalyzeRequest, emit) -> None:
         },
     })
 
+    if req.agent and (why := wrong_object(data, calibration.rel_err)):
+        emit("error", {"stage": "no measurement", "message": why, "steps": 0})
+        return
     if req.agent:
         emit("status", {"stage": "agent"})
         question = agent_question(req.height_m, rest_notes)

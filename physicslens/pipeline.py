@@ -7,10 +7,11 @@ from typing import Any
 
 import numpy as np
 
-from .agent.tools import Toolbox, TrackData
+from .agent.tools import PENDULUM_LENGTH_RANGE, Toolbox, TrackData
 from .calibrate import Calibration
 from .ingest import Video, load_video
 from .llm.meta_client import BudgetExceededError, LLMAuthError, LLMConfigError, LLMError
+from .physics import models
 from .track.base import Track
 from .track.color import track_color
 from .track.motion import field_order, track_motion
@@ -200,6 +201,43 @@ def agent_question(height_m: float | None = None, rest_notes: Sequence[str] = ()
 def to_track_data(tr: Track, calibration: Calibration) -> TrackData:
     # Shift time to the first tracked sample so the toolbox window covers the whole track.
     return TrackData(tr.t - tr.t[0], calibration.to_meters(tr.x), calibration.to_meters(tr.y))
+
+
+# The gate only stops tracks no model could describe; anything that might be physics goes to the agent.
+GATE_R2 = 0.9
+GATE_G = (0.5 * models.G, 1.5 * models.G)
+
+
+def wrong_object(data: TrackData, scale_rel_err: float = 0.0) -> str | None:
+    """Why no measurement is possible, when no fall, throw or swing fits the track; None otherwise.
+
+    Deterministic and free: the agent is not paid to discover that the tracker followed a hand.
+    Runs on its own toolbox so the agent's fit ids are untouched.
+    """
+    box = Toolbox(data, scale_rel_err=scale_rel_err)
+    results = run_fits(box) + run_fits(box, "pendulum", axis="y")  # a swing can read mainly on either axis
+    fitted = [r for r in results if "error" not in r]
+    if not fitted or any(r["check"]["ok"] or _could_be_physics(r) for r in fitted):
+        return None
+    best = max(fitted, key=lambda r: -np.inf if r["r2"] is None else r["r2"])
+    r2 = "undefined" if best["r2"] is None else f"{best['r2']:.2f}"
+    g = best["params"].get("g")
+    g_text = "" if g is None else f", g = {g:.2f} m/s²"
+    return (
+        f"no fall, throw or swing fits this track (best: {best['name']} R² {r2}{g_text}). Likely causes: "
+        "the tracker followed something other than the ball (box the ball or draw a search area around its path), "
+        "the scale is wrong, or the time is off (a slow-motion clip needs its capture frame rate)."
+    )
+
+
+def _could_be_physics(r: dict) -> bool:
+    if r["r2"] is None or r["r2"] < GATE_R2:
+        return False
+    if "g" in r["params"]:
+        g = r["params"]["g"]
+        if g is None or not GATE_G[0] <= g <= GATE_G[1]:
+            return False
+    return "length_m" not in r or PENDULUM_LENGTH_RANGE[0] <= r["length_m"] <= PENDULUM_LENGTH_RANGE[1]
 
 
 def run_fits(box: Toolbox, model: str = "auto", axis: str = "x") -> list[dict]:
