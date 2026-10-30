@@ -242,27 +242,40 @@ def to_track_data(tr: Track, calibration: Calibration) -> TrackData:
     return TrackData(tr.t - tr.t[0], calibration.to_meters(tr.x), calibration.to_meters(tr.y))
 
 
-def wrong_object(data: TrackData, scale_rel_err: float = 0.0) -> str | None:
+_CAUSES = (
+    "Likely causes: the tracker followed something other than the ball (box the ball or draw a search area around "
+    "its path), the scale is wrong, or the time is off (a slow-motion clip needs its capture frame rate)."
+)
+
+
+def wrong_object(data: TrackData, scale_rel_err: float = 0.0, results: list[dict] | None = None) -> str | None:
     """Why no measurement is possible, when no fall, throw or swing fits the track; None otherwise.
 
-    Deterministic and free: the agent is not paid to discover that the tracker followed a hand.
-    Runs on its own toolbox so the agent's fit ids are untouched.
+    Deterministic and free: the agent is not paid to discover that the tracker followed a hand, and
+    without the agent the least-bad fit of a hand's path is not shown as a measurement.
+    Runs on its own toolbox so the agent's fit ids are untouched. `results`: run_fits(model="auto") on
+    this track when already made; only the y-axis swing is then added (pendulum fits are slow).
     """
     box = Toolbox(data, scale_rel_err=scale_rel_err)
-    results = run_fits(box) + run_fits(box, "pendulum", axis="y")  # a swing can read mainly on either axis
+    if results is None:
+        results = run_fits(box)
+    results = results + run_fits(box, "pendulum", axis="y")  # a swing can read mainly on either axis
     fitted = [r for r in results if "error" not in r]
-    if not fitted or any(r["check"]["ok"] or could_be_physics(r) for r in fitted):
+    if not fitted:
+        return f"no model could be fitted to this track ({results[0]['error']}). {_CAUSES}"
+    if any(r["check"]["ok"] or could_be_physics(r) for r in fitted):
         return None
     best = max(fitted, key=lambda r: -np.inf if r["r2"] is None else r["r2"])
     r2 = "undefined" if best["r2"] is None else f"{best['r2']:.2f}"
     g = best["params"].get("g")
     g_text = "" if g is None else f", g = {g:.2f} m/s²"
-    return (
-        f"no fall, throw or swing fits this track (best: {best['name']} R² {r2}{g_text}). Likely causes: "
-        "the tracker followed something other than the ball (box the ball or draw a search area around its path), "
-        "the scale is wrong, or the time is off (a slow-motion clip needs its capture frame rate)."
-    )
+    return f"no fall, throw or swing fits this track (best: {best['name']} R² {r2}{g_text}). {_CAUSES}"
 
+
+
+def reusable(results: list[dict], model: str, axis: str) -> list[dict] | None:
+    """run_fits results the gate can reuse: all models, swing on x (the gate adds y); None otherwise."""
+    return results if model == "auto" and axis == "x" else None
 
 
 def run_fits(box: Toolbox, model: str = "auto", axis: str = "x") -> list[dict]:

@@ -35,6 +35,7 @@ from .pipeline import (
     choose,
     fitted_xy,
     load,
+    reusable,
     run_fits,
     to_track_data,
     track,
@@ -353,8 +354,11 @@ def _analyze(req: AnalyzeRequest, emit) -> None:
     else:
         emit("status", {"stage": "fitting"})
         results = run_fits(box, req.model, req.axis)
-        best = choose(results)
         emit("fits", {"fits": results})
+        if why := wrong_object(data, calibration.rel_err, reusable(results, req.model, req.axis)):
+            emit("error", {"stage": "no measurement", "message": why, "steps": 0})
+            return
+        best = choose(results)
         if best is None:
             emit("error", {"stage": "fitting", "message": "no model could be fitted"})
             return

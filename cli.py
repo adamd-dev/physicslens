@@ -31,6 +31,7 @@ from physicslens.pipeline import (
     agent_question,
     choose,
     load,
+    reusable,
     run_fits,
     to_track_data,
     track,
@@ -104,7 +105,10 @@ def make_sam_client():
 
 
 def report_agent(args, data: TrackData, box: Toolbox, video_warnings: Sequence[str], rest_notes: Sequence[str] = ()) -> int:
-    """Exit codes: 0 accepted and plausible, 1 accepted but flagged, 3 setup/API failure, 4 no answer."""
+    """Exit codes: 0 accepted and plausible, 1 accepted but flagged, 3 setup/API failure, 4 no answer.
+
+    main without --agent: 0 plausible, 1 flagged, 2 tracking failed, 4 no measurement (wrong object).
+    """
     for w in video_warnings:
         print(f"  warning: {w}", file=sys.stderr)
     if why := wrong_object(data, box.scale_rel_err):
@@ -196,7 +200,9 @@ def main(argv=None) -> int:
     if args.agent:
         return report_agent(args, data, box, video_warnings, rest_notes)
     results = run_fits(box, args.model, args.axis)
-    best = choose(results)
+    # The least-bad fit of a hand's path is not a measurement: same gate as before the agent.
+    why = wrong_object(data, box.scale_rel_err, reusable(results, args.model, args.axis))
+    best = None if why else choose(results)
 
     report = {
         "video": args.video,
@@ -212,6 +218,8 @@ def main(argv=None) -> int:
         "fits": results,
         "best": best["fit_id"] if best else None,
     }
+    if why:
+        report["no_measurement"] = why
     if best and args.height and best["model"] == "projectile":
         report["landing"] = box.call("predict_landing", {"fit_id": best["fit_id"], "height_m": args.height})
 
@@ -249,6 +257,9 @@ def main(argv=None) -> int:
         plot(args.plot, data, box, best, args.axis)
         if not args.json:
             print(f"  plot saved to {args.plot}")
+    if why:
+        print(f"no measurement possible: {why}", file=sys.stderr)
+        return 4
     return 0 if best and best["check"]["ok"] else 1
 
 

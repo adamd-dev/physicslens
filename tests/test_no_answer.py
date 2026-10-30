@@ -21,8 +21,9 @@ def test_cli_refuses_an_answer_without_a_check(tmp_path, monkeypatch, capsys):
 
 def test_cli_without_any_fit_exits_cleanly(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(cli, "run_fits", lambda *a, **k: [{"name": "free_fall", "error": "too few points"}])
-    assert cli.main(args(drop_video(tmp_path))[:-1]) == 1
-    assert "error: too few points" in capsys.readouterr().out
+    assert cli.main(args(drop_video(tmp_path))[:-1]) == 4  # no fit, no measurement
+    out = capsys.readouterr()
+    assert "error: too few points" in out.out and "no measurement possible" in out.err
 
 
 def test_api_refuses_an_answer_without_a_check(client, tmp_path, monkeypatch):  # noqa: F811
