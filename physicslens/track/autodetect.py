@@ -38,7 +38,7 @@ _SWING: tuple[tuple[str, dict[str, str]], ...] = (("fit_pendulum", {"axis": "x"}
 @dataclass(frozen=True)
 class Detection:
     box: tuple[int, int, int, int]  # around the ball on `frame`, full-frame pixels
-    frame: int  # index, in the loaded window, of the frame the box is on: where the path starts
+    frame: int  # index, in the loaded window, of the frame the box is on: the first the whole ball moves in
     track: Track  # the path in full-frame pixels, usable as the motion track
     fields: str  # "none" | "top" | "bottom"
     model: str  # the model that fits the path
@@ -149,7 +149,9 @@ def _first_whole(p: _Path) -> int:
     moves: a box around that crescent misses the ball's centre.
     """
     areas = [(b[2] - b[0] + 1) * (b[3] - b[1] + 1) for b in p.boxes]
-    full = WHOLE_SHARE * float(np.median(areas))
+    # A high percentile, not the median: half a path can be crescents. A ball coming towards the camera
+    # grows, so its first whole box may be a little later; SAM tracks both ways from it.
+    full = WHOLE_SHARE * float(np.percentile(areas, 75))
     return next((i for i, a in enumerate(areas) if a >= full), 0)
 
 

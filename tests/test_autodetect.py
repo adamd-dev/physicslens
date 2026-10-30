@@ -195,6 +195,16 @@ def test_the_box_is_around_the_whole_ball_soon_after_release(tmp_path):
     assert abs(cx - 320) < 4 and abs(cy - true_y) < 4
 
 
+def test_the_box_skips_crescents_even_when_most_samples_are_crescents():
+    # Half the path partly masked: a median would take the crescent size as the ball's.
+    from physicslens.track.autodetect import _first_whole, _Path
+
+    crescent, whole = (310, 60, 328, 67), (310, 80, 330, 100)  # 19x8 and 21x21
+    boxes = [crescent] * 5 + [whole] * 4
+    p = _Path(t=list(range(9)), x=[0.0] * 9, y=[0.0] * 9, boxes=boxes, frames=list(range(9)))
+    assert _first_whole(p) == 5
+
+
 @pytest.mark.parametrize(("hidden", "whole"), [(12, True), (18, False)])
 def test_a_path_bridges_a_short_gap_but_not_a_long_one(tmp_path, hidden, whole):
     # 12 frames = 0.2 s (under MAX_GAP_S), 18 frames = 0.3 s (over it). The frame is tall enough
