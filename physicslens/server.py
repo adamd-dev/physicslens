@@ -7,13 +7,13 @@ tool calls and results, never the key. Run with `physicslens-ui`.
 import csv
 import dataclasses
 import json
+import logging
 import math
 import os
 import queue
 import re
 import threading
 import uuid
-import warnings
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Literal
@@ -55,6 +55,8 @@ MAX_UPLOAD_BYTES = 500 * 1024 * 1024
 VIDEO_TYPES = {".mp4": "video/mp4", ".m4v": "video/mp4", ".mov": "video/quicktime", ".webm": "video/webm",
                ".avi": "video/x-msvideo", ".mkv": "video/x-matroska"}
 _ID = re.compile(r"[0-9a-f]{32}")
+MAX_NAME = 200  # characters of an uploaded file name kept for History
+logger = logging.getLogger("physicslens.server")
 
 app = FastAPI(title="PhysicsLens")
 _busy = threading.Lock()  # one analysis at a time: frames are memory-heavy and the budget is shared
@@ -117,9 +119,21 @@ async def upload_video(file: UploadFile) -> dict:
     if info is None:
         dest.unlink(missing_ok=True)
         raise HTTPException(415, "OpenCV cannot decode this video")
-    # The name is kept beside the video for History; the id stays the only thing in any path.
-    (UPLOADS / f"{video_id}.json").write_text(json.dumps({"name": file.filename}))
-    return {"video_id": video_id, "name": file.filename, **info}
+    name = (file.filename or "")[:MAX_NAME]
+    try:  # the name is kept beside the video for History; the id stays the only thing in any path
+        (UPLOADS / f"{video_id}.json").write_text(json.dumps({"name": name}), encoding="utf-8")
+    except OSError:
+        logger.warning("video %s: name not saved", video_id)
+    return {"video_id": video_id, "name": name, **info}
+
+
+@app.get("/api/videos/{video_id}/info")
+def video_info(video_id: str) -> dict:
+    """What the stage needs to show a saved run's video again."""
+    info = _probe(_video_path(video_id))
+    if info is None:
+        raise HTTPException(415, "OpenCV cannot decode this video")
+    return {"video_id": video_id, "name": _video_name(video_id) or "", **info}
 
 
 @app.get("/api/videos/{video_id}/file")
@@ -382,24 +396,24 @@ _MODEL_KEY = {"free_fall": ("g", "m/s²"), "projectile": ("g", "m/s²")}
 
 def summarize(events: list[dict], request: dict) -> dict:
     """What a History row shows, from the run's events: status, the key measured value, cost."""
-    last = {e["event"]: e["data"] for e in events}
+    last = {e["event"]: e["data"] for e in events if isinstance(e.get("data"), dict)}
     result, error, tr = last.get("result"), last.get("error"), last.get("track")
     key = None
-    if result and result["model"] == "pendulum":
+    if result and result.get("model") == "pendulum":
         key = {"name": "L", "value": result.get("length_m"), "err": None, "unit": "m"}
-    elif result and result["params"].get("g") is not None:
-        name, unit = _MODEL_KEY[result["model"]]
-        key = {"name": name, "value": result["params"]["g"], "err": result["stderr_total"].get("g"), "unit": unit}
-    source = (tr or {}).get("source") or request["settings"]["tracker"]
+    elif result and (result.get("params") or {}).get("g") is not None:
+        name, unit = _MODEL_KEY.get(result.get("model"), ("g", "m/s²"))
+        key = {"name": name, "value": result["params"]["g"], "err": (result.get("stderr_total") or {}).get("g"), "unit": unit}
+    source = (tr or {}).get("source") or (request.get("settings") or {}).get("tracker") or "motion"
     return {
-        "status": ("ok" if result["check"]["ok"] else "flagged") if result else "none",
-        "model": result["model"] if result else None,
+        "status": ("ok" if (result.get("check") or {}).get("ok") else "flagged") if result else "none",
+        "model": result.get("model") if result else None,
         "key": key,
-        "dev_pct": result["deviation_pct"].get("g") if result else None,
+        "dev_pct": (result.get("deviation_pct") or {}).get("g") if result else None,
         "tracker": source.split("-")[0],  # motion-top is the motion tracker on one field
         "agent": bool(request.get("agent")),
         "steps": (result or error or {}).get("steps"),
-        "cost_usd": last["cost"]["run_usd"] if "cost" in last else None,
+        "cost_usd": last["cost"].get("run_usd") if "cost" in last else None,
         "error": None if result or not error else {"stage": error.get("stage"), "message": error.get("message")},
         "thumb_t": float(request.get("start") or 0.0),
     }
@@ -411,11 +425,20 @@ def _save_run(run_id: str, req: AnalyzeRequest, events: list[dict]) -> None:
               "video_name": _video_name(req.video_id), "request": request, "events": events}
     record["summary"] = {k: record[k] for k in ("id", "created_at", "video_id", "video_name")} | summarize(events, request)
     RUNS.mkdir(parents=True, exist_ok=True)
-    tmp = RUNS / f"{run_id}.tmp"
-    # Owner-only: prompts, model output, costs and file names stay on this account.
-    with os.fdopen(os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w", encoding="utf-8") as f:
-        json.dump(record, f, allow_nan=False)
-    os.replace(tmp, RUNS / f"{run_id}.json")
+    # The summary also goes in its own small file: the list never parses the full records.
+    _write_private(RUNS / f"{run_id}.json", record)
+    _write_private(RUNS / f"{run_id}.sum.json", record["summary"])
+
+
+def _write_private(path: Path, data) -> None:
+    """Atomic and owner-only: prompts, model output, costs and file names stay on this account."""
+    tmp = path.with_suffix(".tmp")
+    try:
+        with os.fdopen(os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w", encoding="utf-8") as f:
+            json.dump(data, f, allow_nan=False)
+        os.replace(tmp, path)
+    finally:
+        tmp.unlink(missing_ok=True)
 
 
 def _run_path(run_id: str) -> Path:
@@ -428,14 +451,16 @@ def _run_path(run_id: str) -> Path:
 @app.get("/api/runs")
 def list_runs() -> list[dict]:
     summaries = []
-    for path in RUNS.glob("*.json") if RUNS.is_dir() else []:
-        if not _ID.fullmatch(path.stem):
+    for path in RUNS.glob("*.sum.json") if RUNS.is_dir() else []:
+        if not _ID.fullmatch(path.name.removesuffix(".sum.json")):
             continue
         try:
-            summaries.append(json.loads(path.read_text())["summary"])
-        except (OSError, ValueError, KeyError, TypeError):
+            summary = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
             continue  # a broken file never hides the other runs
-    return sorted(summaries, key=lambda r: r["created_at"], reverse=True)
+        if isinstance(summary, dict) and isinstance(summary.get("created_at"), str) and isinstance(summary.get("id"), str):
+            summaries.append(summary)
+    return sorted(summaries, key=lambda r: (r["created_at"], r["id"]), reverse=True)
 
 
 @app.get("/api/runs/{run_id}")
@@ -448,7 +473,9 @@ def get_run(run_id: str) -> dict:
 
 @app.delete("/api/runs/{run_id}", status_code=204)
 def delete_run(run_id: str) -> Response:
-    _run_path(run_id).unlink()  # the video stays: other runs may use it
+    path = _run_path(run_id)
+    (RUNS / f"{run_id}.sum.json").unlink(missing_ok=True)
+    path.unlink(missing_ok=True)  # the video stays: other runs may use it; a second delete is a 404 above
     return Response(status_code=204)
 
 
@@ -473,13 +500,16 @@ def analyze(req: AnalyzeRequest) -> StreamingResponse:
         except Exception as exc:  # noqa: BLE001 - the stream must end with an error event, never hang the UI
             emit("error", {"stage": "internal", "message": f"{type(exc).__name__}: {exc}"})
         finally:
-            emit("done", {})
             try:
+                # Saved before "done" reaches the client, so a History refresh on "done" finds the run.
+                recorded.append({"event": "done", "data": {}})
                 _save_run(run_id, req, recorded)
-            except (OSError, TypeError, ValueError) as exc:
-                warnings.warn(f"run {run_id} not saved to History: {exc}", stacklevel=1)
-            events.put(None)
-            _busy.release()
+            except Exception:  # a failed save must never keep the stream open or the lock held
+                logger.exception("run %s not saved to History", run_id)
+            finally:
+                events.put(_event("done", {}))
+                events.put(None)
+                _busy.release()
 
     threading.Thread(target=work, daemon=True).start()
 

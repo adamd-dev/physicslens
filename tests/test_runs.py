@@ -90,3 +90,50 @@ def test_a_run_record_is_json(client, tmp_path):  # noqa: F811
     run_id = analyze(client, upload_drop(client, tmp_path))[0][1]["id"]
     record = json.loads((server.RUNS / f"{run_id}.json").read_text())
     assert record["id"] == run_id and record["summary"]["id"] == run_id and record["created_at"]
+
+
+def test_a_failing_save_never_locks_the_server(client, tmp_path, monkeypatch):  # noqa: F811
+    # Any error while saving must still end the stream and free the one-run lock.
+    def broken(*a, **k):
+        raise KeyError("ok")
+
+    monkeypatch.setattr(server, "summarize", broken)
+    video = upload_drop(client, tmp_path)
+    assert analyze(client, video)[-1][0] == "done"
+    assert analyze(client, video)[-1][0] == "done"  # not 409
+
+
+def test_the_list_reads_only_summaries(client, tmp_path, monkeypatch):  # noqa: F811
+    run_id = analyze(client, upload_drop(client, tmp_path))[0][1]["id"]
+    (server.RUNS / f"{run_id}.json").write_text("{}")  # the full record is not needed for the list
+    assert [r["id"] for r in client.get("/api/runs").json()] == [run_id]
+    assert client.delete(f"/api/runs/{run_id}").status_code == 204
+    assert client.get("/api/runs").json() == [] and not list(server.RUNS.iterdir())
+
+
+def test_a_summary_without_a_date_is_skipped(client, tmp_path):  # noqa: F811
+    run_id = analyze(client, upload_drop(client, tmp_path))[0][1]["id"]
+    (server.RUNS / ("e" * 32 + ".sum.json")).write_text(json.dumps({"id": "e" * 32}))
+    (server.RUNS / ("d" * 32 + ".sum.json")).write_text(json.dumps(["not", "a", "dict"]))
+    assert [r["id"] for r in client.get("/api/runs").json()] == [run_id]
+
+
+def test_odd_results_still_summarize():
+    events = [{"event": "result", "data": {"model": "spring", "params": {"g": 9.8}, "stderr_total": {}, "check": {}}}]
+    s = server.summarize(events, {"settings": {"tracker": "sam"}})
+    assert s["status"] == "flagged" and s["key"]["name"] == "g" and s["tracker"] == "sam"
+
+
+def test_a_long_file_name_is_cut(client, tmp_path):  # noqa: F811
+    from tests.test_robustness import write_drop
+
+    write_drop(tmp_path / "d.avi", 60, 60, 27)
+    video = upload(client, tmp_path / "d.avi", "x" * 500 + ".avi")
+    assert len(client.get(f"/api/videos/{video}/info").json()["name"]) <= 200
+
+
+def test_video_info_rebuilds_what_the_stage_needs(client, tmp_path):  # noqa: F811
+    video = upload_drop(client, tmp_path)
+    info = client.get(f"/api/videos/{video}/info").json()
+    assert info["video_id"] == video and info["name"] == "drop.avi" and info["width"] == 640 and info["fps"] > 0
+    assert client.get(f"/api/videos/{'0' * 32}/info").status_code == 404
