@@ -113,6 +113,48 @@ def test_cli_skips_the_agent_on_the_wrong_object(tmp_path, monkeypatch, capsys):
     assert "followed something other than the ball" in capsys.readouterr().err
 
 
+def test_api_without_the_agent_gives_no_number_for_the_wrong_object(client, tmp_path):  # noqa: F811
+    # The least-bad fit of a hand's path is still a hand: no result, the same answer as with the agent.
+    path = wandering_video(tmp_path / "w.avi")
+    with open(path, "rb") as f:
+        video_id = client.post("/api/videos", files={"file": ("w.avi", f, "video/x-msvideo")}).json()["video_id"]
+    stream = dict(analyze(client, video_id, settings={"tracker": "motion"}))
+    assert "result" not in stream
+    assert stream["error"]["stage"] == "no measurement" and "followed something other than the ball" in stream["error"]["message"]
+
+
+def test_cli_without_the_agent_gives_no_number_for_the_wrong_object(tmp_path, capsys):
+    path = wandering_video(tmp_path / "w.avi")
+    assert cli.main([path, "--px-per-m", str(PX_PER_M)]) == 4
+    out = capsys.readouterr()
+    assert "followed something other than the ball" in out.err and "g =" not in out.out
+
+
+def test_cli_json_says_why_there_is_no_measurement(tmp_path, capsys):
+    import json
+
+    path = wandering_video(tmp_path / "w.avi")
+    assert cli.main([path, "--px-per-m", str(PX_PER_M), "--json"]) == 4
+    report = json.loads(capsys.readouterr().out)
+    assert report["best"] is None and "followed something other than the ball" in report["no_measurement"]
+
+
+def test_no_fit_at_all_is_no_measurement_not_a_pass():
+    # Too few samples for any model: the agent must not be paid to find that out.
+    why = wrong_object(wandering(n=5))
+    assert why is not None and "no model could be fitted" in why
+
+
+def test_the_gate_reuses_fits_it_is_given(monkeypatch):
+    box = Toolbox(falling())
+    results = pipeline.run_fits(box)
+    calls = []
+    original = Toolbox.call
+    monkeypatch.setattr(Toolbox, "call", lambda self, name, args: calls.append((name, args.get("axis"))) or original(self, name, args))
+    assert wrong_object(falling(), results=results) is None
+    assert calls == [("fit_pendulum", "y")]  # only the fit run_fits does not make
+
+
 def stuck_replies(n):
     """A model that keeps refitting and never decides."""
     return [Reply("", [call(i, "fit_free_fall")]) for i in range(1, n + 1)]
