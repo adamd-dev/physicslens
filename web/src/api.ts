@@ -103,6 +103,7 @@ export interface AgentMessage {
 }
 
 export type StreamEvent =
+  | { event: "run"; data: { id: string } }
   | { event: "status"; data: { stage: string } }
   | { event: "video"; data: { frames: number; fps: number; scale: number; warnings: string[] } }
   | { event: "track"; data: TrackEvent }
@@ -111,7 +112,7 @@ export type StreamEvent =
   | { event: "agent_message"; data: AgentMessage }
   | { event: "result"; data: Result }
   | { event: "cost"; data: { run_usd: number; total_usd: number } }
-  | { event: "error"; data: { stage: string; message: string } }
+  | { event: "error"; data: { stage: string; message: string; steps?: number } }
   | { event: "done"; data: Record<string, never> };
 
 async function failure(response: Response): Promise<Error> {
@@ -165,4 +166,58 @@ export async function analyze(request: AnalyzeRequest, onEvent: (e: StreamEvent)
       onEvent({ event, data: JSON.parse(data || "{}") } as StreamEvent);
     }
   }
+}
+
+export type RunStatus = "ok" | "flagged" | "none";
+
+/** One History row, computed by the server from the run's events. */
+export interface RunSummary {
+  id: string;
+  created_at: string;
+  video_id: string;
+  video_name: string | null;
+  status: RunStatus;
+  model: Result["model"] | null;
+  key: { name: string; value: number | null; err: number | null; unit: string } | null;
+  dev_pct: number | null;
+  tracker: string;
+  agent: boolean;
+  steps: number | null;
+  cost_usd: number | null;
+  error: { stage: string; message: string } | null;
+  thumb_t: number;
+}
+
+/** A saved run: the request and the events exactly as they were streamed. */
+export interface RunRecord {
+  id: string;
+  created_at: string;
+  video_id: string;
+  video_name: string | null;
+  request: AnalyzeRequest;
+  events: StreamEvent[];
+  summary: RunSummary;
+}
+
+export async function listRuns(signal?: AbortSignal): Promise<RunSummary[]> {
+  const response = await fetch("/api/runs", { signal });
+  if (!response.ok) throw await failure(response);
+  return response.json();
+}
+
+export async function getRun(id: string, signal?: AbortSignal): Promise<RunRecord> {
+  const response = await fetch(`/api/runs/${encodeURIComponent(id)}`, { signal });
+  if (!response.ok) throw await failure(response);
+  return response.json();
+}
+
+export async function deleteRun(id: string): Promise<void> {
+  const response = await fetch(`/api/runs/${encodeURIComponent(id)}`, { method: "DELETE" });
+  if (!response.ok) throw await failure(response);
+}
+
+/** The video as it was analysed: the info VideoStage needs, rebuilt from a saved run. */
+export async function videoInfo(videoId: string, signal?: AbortSignal): Promise<VideoInfo | null> {
+  const response = await fetch(`/api/videos/${encodeURIComponent(videoId)}/info`, { signal });
+  return response.ok ? response.json() : null;
 }

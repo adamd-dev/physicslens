@@ -2,7 +2,66 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Instrument tokens: cyan is what was measured, violet is the model. Canvas and SVG read the same variables. */
+:root {
+  --bg: #020617;
+  --surface: #0f172a;
+  --line: #1e293b;
+  --line-strong: #334155;
+  --ink: #f1f5f9;
+  --ink-2: #cbd5e1;
+  --ink-3: #94a3b8;
+  --data: #22d3ee;
+  --model: #c084fc;
+  --pass: #34d399;
+  --flag: #fbbf24;
+  --fail: #fb7185;
+  --grid: rgba(148, 163, 184, 0.08);
+  --grid-major: rgba(148, 163, 184, 0.16);
+  --dur-fast: 150ms;
+  --dur-base: 240ms;
+  --dur-slow: 400ms;
+  --dur-reveal: 600ms;
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
 @layer components {
+  .readout {
+    @apply font-mono tabular-nums tracking-tight;
+  }
+  .graph-paper {
+    background-image: linear-gradient(var(--grid-major) 1px, transparent 1px), linear-gradient(90deg, var(--grid-major) 1px, transparent 1px),
+      linear-gradient(var(--grid) 1px, transparent 1px), linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+    background-size: 40px 40px, 40px 40px, 8px 8px, 8px 8px;
+  }
+  /* A panel with corner ticks, like the frame of an instrument display. */
+  .instrument {
+    @apply panel relative;
+  }
+  .instrument::before,
+  .instrument::after {
+    content: "";
+    position: absolute;
+    width: 10px;
+    height: 10px;
+    border-color: var(--line-strong);
+    pointer-events: none;
+  }
+  .instrument::before {
+    top: 6px;
+    left: 6px;
+    border-top: 1px solid;
+    border-left: 1px solid;
+  }
+  .instrument::after {
+    right: 6px;
+    bottom: 6px;
+    border-right: 1px solid;
+    border-bottom: 1px solid;
+  }
+  .reveal {
+    animation: rise var(--dur-reveal) var(--ease-out) both;
+  }
   .panel {
     @apply rounded-2xl border border-slate-800 bg-slate-900/60 backdrop-blur;
   }
@@ -30,5 +89,7 @@
 .rise { animation: rise 0.35s ease-out both; }
 
 @media (prefers-reduced-motion: reduce) {
-  .rise, .animate-pulse { animation: none; }
+  .rise, .reveal, .animate-pulse { animation: none; }
+  :root { --dur-fast: 0ms; --dur-base: 0ms; --dur-slow: 0ms; --dur-reveal: 0ms; }
+  html { scroll-behavior: auto; }
 }
