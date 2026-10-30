@@ -49,7 +49,11 @@ def _numbers(text: str, n: int, cast=float):
 
 
 def parse_args(argv=None):
-    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="exit codes: 0 measured and plausible, 1 measured but flagged, 2 tracking failed, "
+               "3 setup or API failure (--agent), 4 no measurement (nothing fits a fall, throw or swing)",
+    )
     p.add_argument("video")
     scale = p.add_mutually_exclusive_group(required=True)
     scale.add_argument("--px-per-m", type=float, help="pixels per metre in the plane of motion")
@@ -179,6 +183,11 @@ def plot(path, data: TrackData, box: Toolbox, best: dict, axis: str):
     fig.savefig(path, dpi=120)
 
 
+def _num(value: float | None) -> str:
+    """Three decimals; "n/a" where a summary turned a non-finite value into None (an undefined uncertainty)."""
+    return "n/a" if value is None else f"{value:.3f}"
+
+
 def main(argv=None) -> int:
     args = parse_args(argv)
     video, video_warnings = load(args.video, args.start, args.end, args.capture_fps)
@@ -238,21 +247,28 @@ def main(argv=None) -> int:
             status = "ok" if r["check"]["ok"] else "; ".join(r["check"]["problems"])
             r2 = "n/a" if r["r2"] is None else f"{r['r2']:.5f}"  # undefined when the signal has no variance
             print(f" {mark}{r['name']:<11} r2={r2} rmse={r['rmse_m'] * 1000:.2f} mm  [{status}]")
+        if why:
+            print("\n  no measurement: none of these fits is a real fall, throw or swing (reason below)")
         if best:
             p, s, total = best["params"], best["stderr"], best["stderr_total"]
             if "g" in p:
-                err = 100 * (p["g"] - models.G) / models.G
-                print(f"\n  g = {p['g']:.3f} ± {total['g']:.3f} m/s²  ({err:+.1f}% vs {models.G})")
-                print(f"    ± = fit {s['g']:.3f} and scale {abs(p['g']) * calibration.rel_err:.3f} "
+                g = p["g"]
+                err = "" if g is None else f"  ({100 * (g - models.G) / models.G:+.1f}% vs {models.G})"
+                scale = None if g is None else abs(g) * calibration.rel_err
+                print(f"\n  g = {_num(g)} ± {_num(total['g'])} m/s²{err}")
+                print(f"    ± = fit {_num(s['g'])} and scale {_num(scale)} "
                       f"(±{READ_PX:g} px on the reference); perspective not included")
             if "length_m" in best:
-                period = 2 * np.pi / p["omega"]
-                print(f"\n  pendulum length = {best['length_m']:.3f} m  (period {period:.3f} s)")
+                period = None if not p.get("omega") else 2 * np.pi / p["omega"]
+                print(f"\n  pendulum length = {_num(best['length_m'])} m  (period {_num(period)} s)")
             if "vx" in p:
-                print(f"  vx = {p['vx']:.3f} ± {total['vx']:.3f} m/s")
+                print(f"  vx = {_num(p['vx'])} ± {_num(total['vx'])} m/s")
         if "landing" in report:
             land = report["landing"]
-            print(f"  landing distance = {land['landing_distance_m']:.3f} ± {land['uncertainty_m']:.3f} m")
+            if "error" in land:
+                print(f"  landing distance: not predicted ({land['error']})")
+            else:
+                print(f"  landing distance = {_num(land['landing_distance_m'])} ± {_num(land['uncertainty_m'])} m")
     if args.plot and best:
         plot(args.plot, data, box, best, args.axis)
         if not args.json:

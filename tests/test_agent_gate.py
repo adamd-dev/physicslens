@@ -4,6 +4,7 @@ import itertools
 
 import cv2
 import numpy as np
+import pytest
 
 import cli
 from physicslens import pipeline, server
@@ -143,6 +144,20 @@ def test_no_fit_at_all_is_no_measurement_not_a_pass():
     # Too few samples for any model: the agent must not be paid to find that out.
     why = wrong_object(wandering(n=5))
     assert why is not None and "no model could be fitted" in why
+
+
+@pytest.mark.parametrize(("model", "axis", "reused"), [("auto", "x", True), ("auto", "y", False), ("free_fall", "x", False)])
+def test_only_full_auto_fits_are_reused(model, axis, reused):
+    results = [{"name": "free_fall"}]
+    assert (pipeline.reusable(results, model, axis) is results) is reused
+
+
+def test_a_forced_model_on_a_real_swing_is_flagged_not_blocked(tmp_path, capsys):
+    # The gate asks whether anything physical moves, not whether the forced model fits it.
+    from tests.test_autodetect import pendulum_video
+
+    path = pendulum_video(tmp_path / "p.avi")
+    assert cli.main([path, "--px-per-m", str(PX_PER_M), "--model", "free_fall"]) == 1
 
 
 def test_the_gate_reuses_fits_it_is_given(monkeypatch):
