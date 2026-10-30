@@ -79,6 +79,7 @@ def test_shared_masks_are_not_changed_by_a_search_area(tmp_path):
     autodetect.find_ball(video, PX_PER_M, roi=(0, 0, 400, 479), moving=masks)
     with pytest.raises(ValueError):
         motion.track_motion(video, roi=(0, 0, 100, 100), moving=masks)  # nothing moves there
+    motion.track_motion(video, start=(320, 50), start_radius=30, moving=masks)
     assert np.array_equal(masks, before)
 
 
@@ -99,3 +100,15 @@ def test_the_cli_shrinks_wide_frames_and_scales_its_settings(tmp_path, capsys):
         best = next(r for r in report["fits"] if r["fit_id"] == report["best"])
         g[width] = best["params"]["g"]
     assert g["960"] == pytest.approx(models.G, rel=0.02) and g["960"] == pytest.approx(g["0"], rel=0.01)
+
+
+def test_the_cli_refuses_a_too_long_window_with_exit_2(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(cli, "load", lambda *a: pipeline.load(*a, max_frames=30))
+    write_drop(tmp_path / "d.avi", 60, 60, 50)
+    assert cli.main([str(tmp_path / "d.avi"), "--px-per-m", str(PX_PER_M)]) == 2
+    assert "set a start and end" in capsys.readouterr().err
+
+
+def test_a_negative_max_width_is_a_usage_error(tmp_path):
+    with pytest.raises(SystemExit):
+        cli.main([str(tmp_path / "x.avi"), "--px-per-m", "300", "--max-width", "-5"])

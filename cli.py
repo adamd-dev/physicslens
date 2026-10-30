@@ -91,6 +91,8 @@ def parse_args(argv=None):
     args = p.parse_args(argv)
     if args.transcript and not args.agent:
         p.error("--transcript needs --agent")
+    if args.max_width < 0:
+        p.error("--max-width must be 0 (full size) or a width in pixels")
     if args.tracker != "sam" and (args.sam_box or args.sam_prompt is not None):
         p.error("--sam-box and --sam-prompt need --tracker sam")
     if args.sam_prompt is not None and not (len(args.sam_prompt) <= MAX_TEXT_PROMPT and re.fullmatch(TEXT_PROMPT_PATTERN, args.sam_prompt)):
@@ -231,6 +233,7 @@ def main(argv=None) -> int:
         "tracker": tr.source,
         "tracked_samples": len(tr),
         "rest_dropped": {"start": trim.lead if trim else 0, "end": trim.trail if trim else 0},
+        "decoded_scale": round(s, 4),  # frames were shrunk by this on load; boxes and px_per_m are in source px
         "px_per_m": round(calibration.px_per_m, 2),
         "warnings": video_warnings,
         "fits": results,
