@@ -1,7 +1,7 @@
 import HomePage from "../pages/HomePage";
 
-// The online app (a Hugging Face Space), set at build time; without it the page points to the code.
-const APP_URL = (import.meta.env.VITE_APP_URL as string | undefined)?.replace(/\/$/, "");
+// The online app (a Hugging Face Space); VITE_APP_URL at build time overrides it, an empty value points to the code.
+const APP_URL = ((import.meta.env.VITE_APP_URL as string | undefined) ?? "https://adamd-dev-physicslens.hf.space").replace(/\/$/, "") || undefined;
 
 /** The public page: the Home content without the parts that need the local server (runs, analysis). */
 export default function Landing() {
