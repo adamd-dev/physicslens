@@ -209,22 +209,25 @@ def find_ball(
     max_area: float = 2000,
     threshold: int = 40,
     roi: tuple[int, int, int, int] | None = None,
+    moving: np.ndarray | None = None,
 ) -> Detection | None:
     """The ball's path and a box around it where it starts moving; None when nothing moves like a real object.
 
     `px_per_m` is needed to tell a fall (g near 9.81) from a hand. `fields`: "auto" also tries both field
     orders and keeps a field path only if the video is interlaced. `roi` limits the search to an area.
+    `moving` (from moving_masks with the same threshold) can be shared with the motion tracker; it is not changed.
     """
     if fields not in FIELDS:
         raise ValueError(f"fields must be one of {FIELDS}")
     if not px_per_m > 0:
         raise ValueError("px_per_m must be positive")
-    moving = moving_masks(video, threshold)  # once: the median background is the expensive part
+    if moving is None:
+        moving = moving_masks(video, threshold)  # once: the median background is the expensive part
     if roi is not None:
         x0, y0, x1, y1 = roi
         inside = np.zeros(moving.shape[1:], np.uint8)
         inside[max(0, y0) : y1 + 1, max(0, x0) : x1 + 1] = 1
-        moving &= inside
+        moving = moving & inside  # a copy: shared masks stay whole
     if fields != "auto":
         return _detect(video, moving, None if fields == "none" else fields, px_per_m, min_area, max_area)
     # The wrong field order zig-zags; its path can still pass as a swing, so a field path must also look

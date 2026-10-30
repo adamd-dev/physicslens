@@ -27,6 +27,7 @@ from physicslens.physics import models
 from physicslens.pipeline import (
     FITS,
     MAX_SPEED_M_S,
+    MAX_WIDTH,
     TrackSettings,
     agent_question,
     choose,
@@ -73,6 +74,9 @@ def parse_args(argv=None):
                    help="do not find the ball from how it moves; track the biggest mover (motion) or need --sam-box (sam)")
     p.add_argument("--max-jump", type=float, help=f"max px between samples before a point is rejected (default: what {MAX_SPEED_M_S:g} m/s covers at the scale)")
     p.add_argument("--capture-fps", type=float, help="real capture rate of slow-motion clips, e.g. 240")
+    p.add_argument("--max-width", type=int, default=MAX_WIDTH,
+                   help=f"shrink wider frames to this many px on load, as the UI does (default {MAX_WIDTH}; 0 = full size). "
+                        "Boxes, areas and the scale stay in source pixels")
     p.add_argument("--start", type=float, default=0.0)
     p.add_argument("--end", type=float)
     p.add_argument("--model", choices=["auto", *FITS], default="auto")
@@ -190,21 +194,26 @@ def _num(value: float | None) -> str:
 
 def main(argv=None) -> int:
     args = parse_args(argv)
-    video, video_warnings = load(args.video, args.start, args.end, args.capture_fps)
+    try:
+        video, video_warnings = load(args.video, args.start, args.end, args.capture_fps, args.max_width or None)
+    except (ValueError, FileNotFoundError) as exc:
+        print(f"loading failed: {exc}", file=sys.stderr)
+        return 2
+    s = video.scale  # decoded pixels per source pixel
     calibration = Calibration.from_reference(args.px_per_m, 1.0) if args.px_per_m else Calibration.from_points(
         args.ref[:2], args.ref[2:4], args.ref[4]
     )
     try:
-        fields, tr, track_notes = track(video, settings(args, calibration.px_per_m), sam=lambda: make_sam_client())
+        fields, tr, track_notes = track(video, settings(args, calibration.px_per_m).scaled(s), sam=lambda: make_sam_client())
     except ValueError as exc:
         print(f"tracking failed: {exc}", file=sys.stderr)
         return 2
-    trim = None if args.keep_rest else trim_rest(tr, calibration.px_per_m)
+    trim = None if args.keep_rest else trim_rest(tr, calibration.px_per_m * s)
     rest_notes = trim.notes if trim else []
     if trim:
         tr = trim.track
     video_warnings = [*video_warnings, *track_notes, *rest_notes]
-    data = to_track_data(tr, calibration)
+    data = to_track_data(tr, calibration.scaled(s))
     box = Toolbox(data, scale_rel_err=calibration.rel_err)
     if args.agent:
         return report_agent(args, data, box, video_warnings, rest_notes)

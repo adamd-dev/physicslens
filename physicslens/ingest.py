@@ -47,10 +47,12 @@ def load_video(
     end_s: float | None = None,
     capture_fps: float | None = None,
     max_width: int | None = None,
+    max_frames: int | None = None,
 ) -> Video:
     """Load frames in the half-open real-time window [start_s, end_s).
 
     `max_width` shrinks wider frames on load: a 1080p60 phone clip is ~6 MB per frame in memory.
+    `max_frames`: a longer window is refused as soon as it is exceeded, before the rest is decoded.
     """
     cap = cv2.VideoCapture(path)
     if not cap.isOpened():
@@ -62,7 +64,9 @@ def load_video(
     source_width = cap.get(cv2.CAP_PROP_FRAME_WIDTH)
     scale = max_width / source_width if max_width and source_width > max_width else 1.0
 
-    frames, container_ts, index_ts = [], [], []
+    frames: list[np.ndarray] = []
+    container_ts: list[float] = []
+    index_ts: list[float] = []
     i = 0
     while True:
         ok, frame = cap.read()
@@ -78,6 +82,10 @@ def load_video(
             break
         if scale != 1.0:
             frame = cv2.resize(frame, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
+        if max_frames is not None and len(frames) >= max_frames:
+            cap.release()
+            raise ValueError(f"the window has more than {max_frames} frames ({max_frames * time_scale / playback_fps:.1f} s): "
+                             "set a start and end around the motion")
         frames.append(frame)
         container_ts.append(t_container)
         index_ts.append(t_index)

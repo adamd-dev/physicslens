@@ -30,6 +30,7 @@ from .llm.meta_client import PROJECT_ROOT, LLMError, MetaClient
 from .llm.sam_client import SamClient
 from .physics import models
 from .pipeline import (
+    MAX_WIDTH,
     TrackSettings,
     agent_question,
     choose,
@@ -48,7 +49,6 @@ UPLOADS = PROJECT_ROOT / "cache" / "uploads"
 WEB_DIST = PROJECT_ROOT / "web" / "dist"
 COSTS = PROJECT_ROOT / "costs.csv"
 MAX_UPLOAD_BYTES = 500 * 1024 * 1024
-MAX_WIDTH = 960  # frames are shrunk to this on load; a 1080p60 clip is ~6 MB per frame otherwise
 VIDEO_TYPES = {".mp4": "video/mp4", ".m4v": "video/mp4", ".mov": "video/quicktime", ".webm": "video/webm",
                ".avi": "video/x-msvideo", ".mkv": "video/x-matroska"}
 _ID = re.compile(r"[0-9a-f]{32}")
@@ -181,22 +181,10 @@ class Settings(BaseModel):
     def scaled(self, s: float, px_per_m: float | None = None) -> TrackSettings:
         """The same settings in decoded pixels, after the frames were shrunk by `s`; `px_per_m` in source pixels."""
         return TrackSettings(
-            tracker=self.tracker, hsv_lower=self.hsv_lower, hsv_upper=self.hsv_upper, fields=self.fields,
-            roi=_scale_box(self.roi, s),
-            min_area=max(1, round(self.min_area * s * s)),
-            max_area=max(1, round(self.max_area * s * s)) if self.max_area else None,
-            max_jump=self.max_jump * s if self.max_jump else None,
-            sam_box=_scale_box(self.sam_box, s),
-            sam_prompt=self.sam_prompt,
-            px_per_m=px_per_m * s if px_per_m else None,
-        )
-
-
-def _scale_box(box: tuple[int, int, int, int] | None, s: float) -> tuple[int, int, int, int] | None:
-    if box is None:
-        return None
-    x0, y0, x1, y1 = box
-    return round(x0 * s), round(y0 * s), round(x1 * s), round(y1 * s)
+            tracker=self.tracker, hsv_lower=self.hsv_lower, hsv_upper=self.hsv_upper, fields=self.fields, roi=self.roi,
+            min_area=self.min_area, max_area=self.max_area, max_jump=self.max_jump, sam_box=self.sam_box,
+            sam_prompt=self.sam_prompt, px_per_m=px_per_m,
+        ).scaled(s)
 
 
 class AnalyzeRequest(BaseModel):

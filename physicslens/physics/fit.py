@@ -11,6 +11,7 @@ from . import models
 # line) sends the amplitude to infinity and used up 20000 per start: about a minute per failed fit.
 OSCILLATION_MAXFEV = 2000
 
+
 @dataclass
 class FitResult:
     model: str

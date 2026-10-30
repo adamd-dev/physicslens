@@ -14,12 +14,17 @@ from .llm.meta_client import BudgetExceededError, LLMAuthError, LLMConfigError, 
 from .track.autodetect import Detection, find_ball
 from .track.base import MAX_SPEED_M_S, Track
 from .track.color import track_color
-from .track.motion import field_order, track_motion
+from .track.motion import field_order, moving_masks, track_motion
 from .track.sam import MAX_SAM_FRAMES, SamTrackError, Segmenter, track_sam
 
 FITS = {"free_fall": "fit_free_fall", "projectile": "fit_projectile", "pendulum": "fit_pendulum"}
 MIN_VX = 0.1  # m/s; slower horizontal drift is camera tilt or tracking noise, not a throw
 MOTION_MAX_AREA = 2000
+# Frames a window may hold: 5 s at 240 fps. At 960x540 that is ~1.9 GB of frames plus ~1.6 GB while the
+# masks are made; longer windows need a start and end (SAM takes at most MAX_SAM_FRAMES).
+MAX_FRAMES = 1200
+# Frames are shrunk to this width on load, in the CLI and the UI: a 1080p60 clip is ~6 MB per frame otherwise.
+MAX_WIDTH = 960
 # A still ball (in the hand before release, on the floor after landing) stays within the rest radius
 # for at least MIN_REST_S. The radius never drops below REST_RADIUS_PX: tracking jitter is 1-2 px, and
 # interlaced fields move a still ball half a line. Shorter still runs are the slow first frames of motion.
@@ -43,6 +48,27 @@ class TrackSettings:
     sam_prompt: str | None = None  # explicit opt-in: text prompts miss small balls (tested 2026-10-29)
     px_per_m: float | None = None  # in decoded pixels; gives the motion tracker its default jump limit
     auto_detect: bool = True  # find the ball from how it moves when there is no box or search area
+
+    def scaled(self, s: float) -> "TrackSettings":
+        """The same settings in decoded pixels, after load shrank the frames by `s` (lengths given in source pixels)."""
+        if s == 1.0:
+            return self
+        return replace(
+            self,
+            roi=_scale_box(self.roi, s),
+            min_area=max(1, round(self.min_area * s * s)),
+            max_area=max(1, round(self.max_area * s * s)) if self.max_area else None,
+            max_jump=self.max_jump * s if self.max_jump else None,
+            sam_box=_scale_box(self.sam_box, s),
+            px_per_m=self.px_per_m * s if self.px_per_m else None,
+        )
+
+
+def _scale_box(box: tuple[int, int, int, int] | None, s: float) -> tuple[int, int, int, int] | None:
+    if box is None:
+        return None
+    x0, y0, x1, y1 = box
+    return round(x0 * s), round(y0 * s), round(x1 * s), round(y1 * s)
 
 
 def _sam_client() -> Segmenter:
@@ -86,12 +112,13 @@ def _start(box: tuple[int, int, int, int] | None) -> dict[str, Any]:
 
 
 def load(
-    path: str, start: float = 0.0, end: float | None = None, capture_fps: float | None = None, max_width: int | None = None
+    path: str, start: float = 0.0, end: float | None = None, capture_fps: float | None = None, max_width: int | None = None,
+    max_frames: int | None = MAX_FRAMES,
 ) -> tuple[Video, list[str]]:
     """Load the window; ingest warnings (repaired timestamps, slow motion) come back as text."""
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
-        video = load_video(path, start, end, capture_fps, max_width)
+        video = load_video(path, start, end, capture_fps, max_width, max_frames)
     return video, [str(w.message) for w in caught]
 
 
@@ -106,12 +133,15 @@ def _found_note(d: Detection) -> str:
     return note
 
 
-def _find(video: Video, s: TrackSettings, on_detect: Callable[[Detection], None] | None) -> Detection | None:
+def _find(
+    video: Video, s: TrackSettings, on_detect: Callable[[Detection], None] | None, moving: np.ndarray | None = None
+) -> Detection | None:
     if not s.auto_detect or not s.px_per_m:
         return None  # without a scale a fall cannot be told from a hand
     # "none" is the default, not a choice: detection checks for interlacing itself. A field order is kept.
     fields = s.fields if s.tracker == "motion" and s.fields in ("top", "bottom") else "auto"
-    detection = find_ball(video, s.px_per_m, fields=fields, min_area=s.min_area, max_area=s.max_area or MOTION_MAX_AREA, roi=s.roi)
+    detection = find_ball(video, s.px_per_m, fields=fields, min_area=s.min_area, max_area=s.max_area or MOTION_MAX_AREA, roi=s.roi,
+                          moving=moving)
     if detection and on_detect:
         on_detect(detection)
     return detection
@@ -161,13 +191,14 @@ def track(
         return "none", track_color(video, s.hsv_lower, s.hsv_upper, s.min_area, s.max_jump, max_area=s.max_area, roi=s.roi), []
     # A search area or a jump limit means the user is tracking by hand.
     searched = s.roi is None and s.max_jump is None and start_box is None and s.auto_detect and bool(s.px_per_m)
+    moving = moving_masks(video)  # once: the search and every field pass share the median background
     notes = []
     if searched:
-        if detection := _find(video, s, on_detect):
+        if detection := _find(video, s, on_detect, moving):
             return detection.fields, detection.track, [_found_note(detection)]
         notes = [NOT_FOUND_NOTE]
     kw: dict[str, Any] = {"min_area": s.min_area, "max_area": s.max_area or MOTION_MAX_AREA, "max_jump_px": s.max_jump, "roi": s.roi,
-                          **_start(start_box)}
+                          "moving": moving, **_start(start_box)}
     if s.max_jump is None and s.px_per_m:
         kw["max_speed_px_s"] = MAX_SPEED_M_S * s.px_per_m
     if s.fields == "auto":

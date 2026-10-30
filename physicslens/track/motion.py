@@ -28,9 +28,19 @@ JITTER_PX = 4.0
 
 
 def moving_masks(video: Video, threshold: int = 40) -> np.ndarray:
-    """Per frame, the pixels that differ from the median background (flicker on static edges removed)."""
+    """Per frame, the pixels that differ from the median background (flicker on static edges removed).
+
+    All in int16, in place: a float64 difference of the whole clip is 4 times the gray stack (a 240 fps
+    clip ran out of memory). The median of whole numbers is a whole or half number, so twice it is exact
+    in int16 (at most 510): comparing doubled values gives the same masks as the float formula.
+    """
     gray = np.array([cv2.cvtColor(f, cv2.COLOR_BGR2GRAY) for f in video.frames], np.int16)
-    moving = (np.abs(gray - np.median(gray, axis=0)) > threshold).astype(np.uint8)
+    background2 = np.rint(2 * np.median(gray, axis=0)).astype(np.int16)
+    gray *= 2
+    gray -= background2
+    np.abs(gray, out=gray)
+    moving = (gray > 2 * threshold).astype(np.uint8)
+    del gray
     moving &= (moving.mean(axis=0) <= FLICKER_SHARE).astype(np.uint8)
     return moving
 
@@ -65,6 +75,7 @@ def track_motion(
     start: tuple[float, float] | None = None,
     start_radius: float | None = None,
     max_speed_px_s: float | None = None,
+    moving: np.ndarray | None = None,
 ) -> Track:
     """Track the moving object. `fields` is None, "top" or "bottom" (which field comes first).
 
@@ -73,6 +84,7 @@ def track_motion(
     within `start_radius` of it, not with the biggest mover (a hand, a head).
     `max_speed_px_s`, when `max_jump_px` is not given, splits the track where the blob would have moved
     faster than that: a longer gap allows a longer step, so a ball hidden for a while is not cut off.
+    `moving` (from moving_masks) is shared between passes and never changed here.
     """
     if fields not in (None, "top", "bottom"):
         raise ValueError("fields must be None, 'top' or 'bottom'")
@@ -80,19 +92,20 @@ def track_motion(
     xs: list[float] = []
     ys: list[float] = []
     previous = start
-    for t, moving, y_scale, y_offset in _samples(video, fields, threshold):
+    for t, mask_in, y_scale, y_offset in _samples(video, fields, threshold, moving):
+        frame_mask = mask_in
         if roi is not None:
             x0, y0, x1, y1 = roi
-            inside = np.zeros_like(moving)
+            inside = np.zeros_like(frame_mask)
             rows = slice(max(0, (y0 - y_offset + y_scale - 1) // y_scale), max(0, (y1 - y_offset) // y_scale + 1))
             inside[rows, x0:x1] = 1
-            moving &= inside
+            frame_mask = frame_mask & inside  # a copy: the shared masks stay whole
         if not ts and start is not None and start_radius is not None:
             # Until the ball moves, only blobs near the box can be it; whatever moves elsewhere is not.
-            yy, xx = np.ogrid[: moving.shape[0], : moving.shape[1]]
-            moving &= (np.hypot(xx - start[0], yy * y_scale + y_offset - start[1]) <= start_radius).astype(np.uint8)
+            yy, xx = np.ogrid[: frame_mask.shape[0], : frame_mask.shape[1]]
+            frame_mask = frame_mask & (np.hypot(xx - start[0], yy * y_scale + y_offset - start[1]) <= start_radius).astype(np.uint8)
         # Areas are given in full-frame pixels; a field has half the rows.
-        mask = _sized_blobs(moving, min_area / y_scale, max_area / y_scale)
+        mask = _sized_blobs(frame_mask, min_area / y_scale, max_area / y_scale)
         # Compare in field coordinates so the continuity check uses like with like.
         prev_field: tuple[float, float] | None = None if previous is None else (previous[0], (previous[1] - y_offset) / y_scale)
         c = pick_blob(mask, min_area / y_scale, prev_field)
@@ -146,14 +159,16 @@ def is_interlaced(field_track: Track, frame_dt: float) -> bool:
     return float(np.median(step[same_frame])) > 0.25 * float(np.median(step[~same_frame]))
 
 
-def field_order(video: Video, **kwargs) -> tuple[str, Track]:
+def field_order(video: Video, moving: np.ndarray | None = None, **kwargs) -> tuple[str, Track]:
     """Return ("none" | "top" | "bottom", track) for possibly interlaced video.
 
     The wrong field order makes the object jump back and forth every half frame,
     so the smoother trajectory wins; no physics model needed.
     """
-    candidates = {order: track_motion(video, fields=order, **kwargs) for order in ("top", "bottom")}
+    if moving is None:
+        moving = moving_masks(video, kwargs.get("threshold", 40))  # once for the three passes
+    candidates = {order: track_motion(video, fields=order, moving=moving, **kwargs) for order in ("top", "bottom")}
     best = min(candidates, key=lambda order: roughness(candidates[order]))
     if not is_interlaced(candidates[best], 1.0 / video.fps):
-        return "none", track_motion(video, fields=None, **kwargs)
+        return "none", track_motion(video, fields=None, moving=moving, **kwargs)
     return best, candidates[best]

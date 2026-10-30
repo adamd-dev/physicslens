@@ -25,10 +25,15 @@ def reference_masks(video, threshold=40):
     return moving & (moving.mean(axis=0) <= FLICKER_SHARE).astype(np.uint8)
 
 
-def test_masks_are_unchanged(tmp_path):
-    write_drop(tmp_path / "d.avi", 60, 60, 27, distractor=True)
+@pytest.mark.parametrize("n_frames", [27, 28])  # an even count gives half-number medians
+def test_masks_are_unchanged(tmp_path, n_frames):
+    write_drop(tmp_path / "d.avi", 60, 60, n_frames, distractor=True)
     video = load_video(str(tmp_path / "d.avi"))
-    assert np.array_equal(moving_masks(video), reference_masks(video))
+    noisy = [np.clip(f.astype(np.int16) + np.random.default_rng(i).integers(-45, 46, f.shape), 0, 255).astype(np.uint8)
+             for i, f in enumerate(video.frames)]  # noise near the threshold exercises the rounding
+    video.frames[:] = noisy
+    for threshold in (40, 41):
+        assert np.array_equal(moving_masks(video, threshold), reference_masks(video, threshold))
 
 
 def test_masks_never_hold_a_float_copy_of_the_clip(tmp_path):
