@@ -17,7 +17,8 @@ COPY --chown=user physicslens/ physicslens/
 # Editable: the package finds cache/, costs.csv and web/dist under /app (PROJECT_ROOT is the source tree).
 RUN pip install --no-cache-dir -e ".[ui]"
 COPY --chown=user --from=web /web/dist web/dist
-RUN mkdir -p cache && chown -R user /app
+# The spend log lives with the other data in cache/: on Cloud Run that is a bucket, so the budget cap survives restarts.
+RUN mkdir -p cache && ln -s cache/costs.csv costs.csv && chown -R user /app
 USER user
 ENV PHYSICSLENS_HOST=0.0.0.0 \
     PHYSICSLENS_PORT=7860 \

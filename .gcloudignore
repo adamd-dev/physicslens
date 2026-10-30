@@ -1,0 +1,22 @@
+# What `gcloud run deploy --source .` uploads to Cloud Build: the code only. Secrets, data and videos stay here.
+.git
+.gitignore
+.gcloudignore
+.venv
+.env
+.env.*
+.claude
+cache
+runs
+samples
+graphify-out
+costs.csv
+tests
+__pycache__
+*.egg-info
+physicslens.egg-info
+web/node_modules
+web/dist
+web/dist-landing
+web/dist-landing-ssr
+space
