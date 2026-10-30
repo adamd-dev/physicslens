@@ -17,6 +17,7 @@ SETTINGS = {"tracker": "color"}
 def client(tmp_path, monkeypatch):
     monkeypatch.setattr(server, "UPLOADS", tmp_path / "uploads")
     monkeypatch.setattr(server, "COSTS", tmp_path / "costs.csv")
+    monkeypatch.setattr(server, "RUNS", tmp_path / "runs", raising=False)  # history never lands in the real cache
     return TestClient(server.app)
 
 
