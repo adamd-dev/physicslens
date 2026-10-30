@@ -8,7 +8,7 @@ const HomePage = lazy(() => import("./pages/HomePage"));
 const HistoryPage = lazy(() => import("./pages/HistoryPage"));
 const RunDetailPage = lazy(() => import("./pages/RunDetailPage"));
 
-const TITLES = { home: "PhysicsLens: Measure g with your phone", analyze: "Analyze a video · PhysicsLens", history: "History · PhysicsLens", run: "Run · PhysicsLens" };
+const TITLES = { home: "PhysicsLens: Measure gravity with your phone", analyze: "Analyze a video · PhysicsLens", history: "History · PhysicsLens", run: "Run · PhysicsLens" };
 
 export default function App() {
   const route = useRoute();

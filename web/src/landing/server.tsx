@@ -30,7 +30,7 @@ export function jsonLd(siteUrl: string): string {
         operatingSystem: "macOS, Linux, Windows (Python 3, runs locally)",
         isAccessibleForFree: true,
         offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
-        codeRepository: "https://github.com/adamd-dev/physicslens",
+        sameAs: ["https://github.com/adamd-dev/physicslens"],
         author: { "@type": "Person", name: "Adam D.", url: "https://github.com/adamd-dev" },
         featureList: [
           "Measure g from a ball drop video",
