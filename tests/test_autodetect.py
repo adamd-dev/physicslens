@@ -184,34 +184,42 @@ def test_a_constant_speed_mover_is_not_a_ball(tmp_path):
     assert find_ball(load_video(constant_speed_video(tmp_path / "c.avi")), PX_PER_M) is None
 
 
-def test_the_box_is_on_the_release_frame_and_around_the_ball(tmp_path):
+def test_the_box_is_around_the_whole_ball_soon_after_release(tmp_path):
+    # Where the ball was held is masked as flicker, so it first shows as a crescent; the box must not be that.
     det = find_ball(load_video(held_drop_beside_a_hand(tmp_path / "held.avi")), PX_PER_M)
-    assert det is not None and det.frame in (9, 10)
+    assert det is not None and 9 <= det.frame <= 20
+    x0, y0, x1, y1 = det.box
+    true_y = 60 + PX_PER_M * models.free_fall((det.frame - 9) / 60, 0, 0, models.G)
+    assert x0 <= 320 <= x1 and y0 <= true_y <= y1
     cx, cy = centre(det.box)
-    assert abs(cx - 320) < 6 and abs(cy - (60 + PX_PER_M * models.free_fall(max(det.frame - 9, 0) / 60, 0, 0, models.G))) < 6
+    assert abs(cx - 320) < 4 and abs(cy - true_y) < 4
 
 
 @pytest.mark.parametrize(("hidden", "whole"), [(12, True), (18, False)])
 def test_a_path_bridges_a_short_gap_but_not_a_long_one(tmp_path, hidden, whole):
-    # 12 frames = 0.2 s (under MAX_GAP_S), 18 frames = 0.3 s (over it).
+    # 12 frames = 0.2 s (under MAX_GAP_S), 18 frames = 0.3 s (over it). The frame is tall enough
+    # that the ball is still in view well after the gap.
     from tests.test_robustness import write_drop
 
     path = tmp_path / "gap.avi"
-    write_drop(path, capture_fps=60, playback_fps=60, n_frames=40, hidden=range(8, 8 + hidden))
+    write_drop(path, capture_fps=60, playback_fps=60, n_frames=46, hidden=range(8, 8 + hidden), size=(640, 960))
     det = find_ball(load_video(str(path)), PX_PER_M)
     assert det is not None
-    visible = 40 - hidden
-    assert (len(det.track) == visible) is whole
+    assert (float(np.max(np.diff(det.track.t))) > 0.9 * hidden / 60) is whole
 
 
 def test_a_fall_makes_no_pendulum_fit(tmp_path, monkeypatch):
+    # Pendulum fits are slow; a path a fall fits never gets them. (A bigger mover that no fall fits
+    # does get them, by design: the farthest physical path wins, swing or fall.)
     from physicslens.agent.tools import Toolbox
+    from tests.test_robustness import write_drop
 
     calls = []
     original = Toolbox.call
     monkeypatch.setattr(Toolbox, "call", lambda self, name, args: calls.append(name) or original(self, name, args))
-    assert find_ball(load_video(drop_with_a_bigger_mover(tmp_path / "two.avi")), PX_PER_M) is not None
-    assert "fit_pendulum" not in calls
+    write_drop(tmp_path / "fall.avi", capture_fps=60, playback_fps=60, n_frames=27)
+    assert find_ball(load_video(str(tmp_path / "fall.avi")), PX_PER_M) is not None
+    assert "fit_free_fall" in calls and "fit_pendulum" not in calls
 
 
 def test_auto_detect_off_leaves_the_motion_path_alone(tmp_path):
