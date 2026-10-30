@@ -17,7 +17,6 @@ SETTINGS = {"tracker": "color"}
 def client(tmp_path, monkeypatch):
     monkeypatch.setattr(server, "UPLOADS", tmp_path / "uploads")
     monkeypatch.setattr(server, "COSTS", tmp_path / "costs.csv")
-    monkeypatch.setattr(server, "RUNS", tmp_path / "runs", raising=False)  # history never lands in the real cache
     return TestClient(server.app)
 
 
@@ -50,7 +49,7 @@ def analyze(client, video_id, **extra):
 def test_analyze_streams_track_fits_and_result(client, tmp_path):
     stream = analyze(client, upload_drop(client, tmp_path))
     names = [name for name, _ in stream]
-    assert [n for n in names if n != "status"] == ["video", "track", "fits", "result", "done"]
+    assert [n for n in names if n != "status"] == ["run", "video", "track", "fits", "result", "done"]
     track = dict(stream)["track"]
     assert track["x_px"][0] == pytest.approx(320, abs=1)  # source pixels, for the overlay
     result = dict(stream)["result"]
