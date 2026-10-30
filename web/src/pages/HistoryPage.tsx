@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useFocusHeading } from "../hooks/useFocusHeading";
 import type { RunStatus, RunSummary } from "../api";
 import { deleteRun, listRuns } from "../api";
-import { MODEL_LABEL, TRACKER_LABEL } from "../history/format";
+import { MODEL_LABEL, runTitle, TRACKER_LABEL } from "../history/format";
 import RunRow from "../history/RunRow";
 import { href, navigate } from "../router";
 
@@ -18,20 +19,26 @@ type Sort = keyof typeof SORTS;
 export default function HistoryPage({ query, onChange }: { query: URLSearchParams; onChange?: () => void }) {
   const [runs, setRuns] = useState<RunSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null); // announced after a delete, or why it failed
+  const heading = useFocusHeading();
+  const request = useRef<AbortController | null>(null);
   const status = (query.get("status") as RunStatus | null) ?? "all";
   const model = query.get("model") ?? "";
   const tracker = query.get("tracker") ?? "";
   const sort = (query.get("sort") as Sort | null) ?? "new";
 
   const load = useCallback(() => {
-    const controller = new AbortController();
+    request.current?.abort(); // a second Retry wins over the first
+    const controller = (request.current = new AbortController());
     setError(null);
     listRuns(controller.signal)
       .then(setRuns)
       .catch((e: Error) => e.name !== "AbortError" && setError(e.message));
-    return () => controller.abort();
   }, []);
-  useEffect(load, [load]);
+  useEffect(() => {
+    load();
+    return () => request.current?.abort();
+  }, [load]);
 
   const setQuery = (key: string, value: string) => {
     const next = new URLSearchParams(query);
@@ -62,14 +69,16 @@ export default function HistoryPage({ query, onChange }: { query: URLSearchParam
   }, [runs, status, model, tracker, sort]);
 
   const remove = async (id: string) => {
-    const before = runs;
+    const run = runs?.find((x) => x.id === id);
     setRuns((r) => r?.filter((x) => x.id !== id) ?? null); // optimistic: back if the server says no
+    heading.current?.focus(); // the focused button is gone; keep keyboard users on the page
     try {
       await deleteRun(id);
+      setNotice(`Deleted ${run ? runTitle(run) : "the run"}.`);
       onChange?.();
     } catch (e) {
-      setRuns(before);
-      throw e;
+      if (run) setRuns((r) => (r && !r.some((x) => x.id === id) ? [...r, run] : r));
+      setNotice(`Could not delete ${run ? runTitle(run) : "the run"}: ${(e as Error).message}`);
     }
   };
 
@@ -77,7 +86,7 @@ export default function HistoryPage({ query, onChange }: { query: URLSearchParam
     <div>
       <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 tabIndex={-1} className="text-2xl font-semibold tracking-tight focus:outline-none">History</h1>
+          <h1 ref={heading} tabIndex={-1} className="text-2xl font-semibold tracking-tight focus:outline-none">History</h1>
           <p className="text-sm text-slate-400">
             {runs ? `${runs.length} saved ${runs.length === 1 ? "run" : "runs"}` : "Saved runs"} · stored on this machine only
           </p>
@@ -87,6 +96,9 @@ export default function HistoryPage({ query, onChange }: { query: URLSearchParam
         </a>
       </div>
 
+      <p role="status" className={notice ? "mb-3 text-sm text-slate-300" : "sr-only"}>
+        {notice ?? (runs ? `${shown.length} of ${runs.length} runs shown` : "")}
+      </p>
       <div className="mb-4 flex flex-wrap items-center gap-3">
         <div role="group" aria-label="Status" className="flex flex-wrap gap-1 rounded-xl border border-slate-800 p-1">
           {STATUSES.map((s) => (

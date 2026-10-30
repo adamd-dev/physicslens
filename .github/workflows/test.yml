@@ -33,5 +33,7 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
       - run: npm ci
+      # Home page maths (least squares, pendulum integrator).
+      - run: npm test
       # tsc --noEmit, then vite build.
       - run: npm run build

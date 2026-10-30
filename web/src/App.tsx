@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useState } from "react";
 import { listRuns } from "./api";
 import AppHeader from "./components/AppHeader";
 import AnalyzePage from "./pages/AnalyzePage";
@@ -16,7 +16,6 @@ export default function App() {
   const [runCount, setRunCount] = useState<number | null>(null);
   // Analyze mounts on first visit and then stays: an analysis in progress and the loaded video survive tab switches.
   const [analyzeMounted, setAnalyzeMounted] = useState(route.page === "analyze");
-  const main = useRef<HTMLElement>(null);
 
   const refreshCount = useCallback(() => {
     listRuns()
@@ -32,21 +31,21 @@ export default function App() {
     [refreshCount],
   );
 
+  // Only a new page scrolls to the top: a filter change on the same page keeps the reader's place.
+  const pageKey = route.page === "run" ? `run/${route.id}` : route.page;
   useEffect(() => {
     if (route.page === "analyze") setAnalyzeMounted(true);
     document.title = TITLES[route.page];
-    // A new page is announced by moving focus to its heading, as a page load would.
-    requestAnimationFrame(() => main.current?.querySelector<HTMLElement>("h1:not([hidden] h1)")?.focus({ preventScroll: true }));
     window.scrollTo({ top: 0 });
-  }, [route]);
+  }, [pageKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="mx-auto max-w-[1400px] px-5 pb-4">
       <AppHeader route={route} running={running} runCount={runCount} />
-      <main id="main" ref={main} tabIndex={-1} className="focus:outline-none">
+      <main id="main" tabIndex={-1} className="focus:outline-none">
         {analyzeMounted && (
           <div hidden={route.page !== "analyze"}>
-            <AnalyzePage onRunning={onRunning} />
+            <AnalyzePage active={route.page === "analyze"} onRunning={onRunning} />
           </div>
         )}
         <Suspense fallback={<div className="panel h-64 animate-pulse" aria-busy="true" />}>

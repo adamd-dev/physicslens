@@ -7,6 +7,7 @@ import SettingsPanel, { type Options } from "../components/SettingsPanel";
 import VideoStage, { type Mode, type Roi } from "../components/VideoStage";
 import { href } from "../router";
 import { useRunState } from "../runState";
+import { useFocusHeading } from "../hooks/useFocusHeading";
 
 // Recharts is heavy and only needed after a result, so keep it out of the first load.
 const Charts = lazy(() => import("../components/Charts"));
@@ -28,7 +29,8 @@ export const TRACKERS: Record<string, string> = { motion: "motion", color: "colo
 const STAGES: Record<string, string> = { loading: "Loading frames", tracking: "Tracking the ball", fitting: "Fitting models", agent: "Muse is reasoning" };
 
 /** The analysis workbench. Stays mounted while the user visits other pages, so a run in progress goes on. */
-export default function AnalyzePage({ onRunning }: { onRunning?: (running: boolean) => void }) {
+export default function AnalyzePage({ active = true, onRunning }: { active?: boolean; onRunning?: (running: boolean) => void }) {
+  const heading = useFocusHeading(active);
   const [info, setInfo] = useState<VideoInfo | null>(null);
   const [uploading, setUploading] = useState(false);
   const [mode, setMode] = useState<Mode>("calibrate");
@@ -98,7 +100,7 @@ export default function AnalyzePage({ onRunning }: { onRunning?: (running: boole
     <div>
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div className="min-w-0">
-          <h1 tabIndex={-1} className="text-lg font-semibold leading-tight focus:outline-none">Analyze a video</h1>
+          <h1 ref={heading} tabIndex={-1} className="text-lg font-semibold leading-tight focus:outline-none">Analyze a video</h1>
           <p className="text-sm text-slate-400">Film an experiment. Measure the physics. Checked by an agent, not guessed.</p>
         </div>
         {info && (
@@ -117,7 +119,7 @@ export default function AnalyzePage({ onRunning }: { onRunning?: (running: boole
           <section aria-label="Video and charts" className="space-y-4">
             <div className="panel p-4">
               <VideoStage
-                info={info} mode={mode} points={points} lengthM={lengthM} roi={roi} ballBox={sam ? ballBox : null} startS={options.start}
+                active={active} info={info} mode={mode} points={points} lengthM={lengthM} roi={roi} ballBox={sam ? ballBox : null} startS={options.start}
                 track={track} result={result} onPoints={setPoints} onRoi={setRoi} onBallBox={setBallBox}
               />
               <div className="mt-4 flex flex-wrap items-center gap-2">

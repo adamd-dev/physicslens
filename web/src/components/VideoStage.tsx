@@ -6,6 +6,7 @@ export type Mode = "view" | "calibrate" | "roi" | "ball";
 export type Roi = [number, number, number, number];
 
 interface Props {
+  active?: boolean; // false while the page is hidden: no drawing, the video pauses
   info: VideoInfo;
   mode: Mode;
   points: Point[]; // calibration clicks, source pixels
@@ -30,13 +31,18 @@ const HINT: Record<Mode, string> = {
   ball: "Drag a tight box around the ball on this first frame",
 };
 
-export default function VideoStage({ info, mode, points, lengthM, roi, ballBox, startS, track, result, onPoints, onRoi, onBallBox }: Props) {
+export default function VideoStage({ active = true, info, mode, points, lengthM, roi, ballBox, startS, track, result, onPoints, onRoi, onBallBox }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const drag = useRef<{ start: Point; now: Point } | null>(null);
   // The draw loop reads the latest props through this ref instead of restarting on every change.
   const state = useRef({ mode, points, lengthM, roi, ballBox, track, result });
   state.current = { mode, points, lengthM, roi, ballBox, track, result };
+  const activeRef = useRef(active);
+  activeRef.current = active;
+  useEffect(() => {
+    if (!active) videoRef.current?.pause();
+  }, [active]);
 
   // SAM follows the object from the first analysed frame, so the box is drawn on that frame.
   useEffect(() => {
@@ -51,6 +57,7 @@ export default function VideoStage({ info, mode, points, lengthM, roi, ballBox, 
     let frame = 0;
     const draw = () => {
       frame = requestAnimationFrame(draw);
+      if (!activeRef.current) return; // hidden page: nothing to draw
       const canvas = canvasRef.current;
       const video = videoRef.current;
       if (!canvas || !video) return;

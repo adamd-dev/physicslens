@@ -1,12 +1,14 @@
 import RecentRuns from "../home/RecentRuns";
+import { useFocusHeading } from "../hooks/useFocusHeading";
 import { href } from "../router";
 
 export default function HomePage({ showRuns = true }: { showRuns?: boolean }) {
+  const heading = useFocusHeading();
   return (
     <div>
       <section className="py-8 lg:py-16">
         <p className="label">Measure · fit · check</p>
-        <h1 tabIndex={-1} className="mt-3 text-4xl font-semibold tracking-tight focus:outline-none sm:text-5xl lg:text-6xl">Measure g with your phone.</h1>
+        <h1 ref={heading} tabIndex={-1} className="mt-3 text-4xl font-semibold tracking-tight focus:outline-none sm:text-5xl lg:text-6xl">Measure g with your phone.</h1>
         <p className="mt-4 max-w-xl text-lg text-slate-300">
           Film a ball drop, a throw or a pendulum. PhysicsLens tracks the ball, fits the physics with SciPy, and a Meta Muse Spark agent checks the fit before you
           see a number.

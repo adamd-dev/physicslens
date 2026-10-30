@@ -5,10 +5,9 @@ import { href } from "../router";
 import { costText, keyText, relativeTime, runTitle, TRACKER_LABEL } from "./format";
 
 /** One saved run: thumbnail, what was measured, status. The whole row opens the run; delete sits outside the link. */
-export default function RunRow({ run, onDelete }: { run: RunSummary; onDelete?: (id: string) => Promise<void> }) {
+export default function RunRow({ run, onDelete }: { run: RunSummary; onDelete?: (id: string) => void }) {
   const [thumbOk, setThumbOk] = useState(true);
   const [confirming, setConfirming] = useState(false);
-  const [deleteError, setDeleteError] = useState<string | null>(null);
   const measured = run.key && run.key.value != null;
   return (
     <li className="group relative flex items-center gap-3 rounded-xl border border-slate-800 bg-slate-900/40 p-2 pr-3 transition hover:border-slate-600 focus-within:border-slate-600">
@@ -52,13 +51,7 @@ export default function RunRow({ run, onDelete }: { run: RunSummary; onDelete?: 
             <>
               <button
                 className="btn min-h-8 px-2 text-xs text-rose-300 hover:bg-rose-500/10"
-                onClick={() => {
-                  setDeleteError(null);
-                  onDelete(run.id).catch((e: Error) => {
-                    setDeleteError(e.message);
-                    setConfirming(false);
-                  });
-                }}
+                onClick={() => onDelete(run.id)}
               >
                 Delete
               </button>
@@ -72,7 +65,6 @@ export default function RunRow({ run, onDelete }: { run: RunSummary; onDelete?: 
               <span aria-hidden="true">🗑</span>
             </button>
           )}
-          {deleteError && <span role="alert" className="text-xs text-rose-300">{deleteError}</span>}
         </div>
       )}
     </li>

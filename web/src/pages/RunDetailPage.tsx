@@ -8,6 +8,7 @@ import VideoStage from "../components/VideoStage";
 import { MODEL_LABEL, TRACKER_LABEL, runTitle } from "../history/format";
 import { href, navigate } from "../router";
 import { applyEvent, EMPTY_RUN, type RunState } from "../runState";
+import { useFocusHeading } from "../hooks/useFocusHeading";
 
 const Charts = lazy(() => import("../components/Charts"));
 const noop = () => {};
@@ -19,16 +20,22 @@ export default function RunDetailPage({ id, onDeleted }: { id: string; onDeleted
   const [info, setInfo] = useState<VideoInfo | null | undefined>(undefined); // null: the video is gone
   const [error, setError] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
+  const heading = useFocusHeading(record !== null || error !== null);
 
   useEffect(() => {
     const controller = new AbortController();
     setRecord(null);
+    setState(EMPTY_RUN);
+    setInfo(undefined);
     setError(null);
     getRun(id, controller.signal)
       .then((r) => {
         setRecord(r);
         setState(r.events.reduce(applyEvent, EMPTY_RUN));
-        return videoInfo(r.video_id, controller.signal).then(setInfo);
+        // A video that cannot be read is shown as gone; the run itself still loaded.
+        videoInfo(r.video_id, controller.signal)
+          .then(setInfo)
+          .catch((e: Error) => e.name !== "AbortError" && setInfo(null));
       })
       .catch((e: Error) => e.name !== "AbortError" && setError(e.message));
     return () => controller.abort();
@@ -37,7 +44,7 @@ export default function RunDetailPage({ id, onDeleted }: { id: string; onDeleted
   if (error) {
     return (
       <div className="panel p-6">
-        <h1 tabIndex={-1} className="text-lg font-semibold focus:outline-none">Run not found</h1>
+        <h1 ref={heading} tabIndex={-1} className="text-lg font-semibold focus:outline-none">Run not found</h1>
         <p className="mt-1 text-sm text-slate-400">It may have been deleted. ({error})</p>
         <a className="mt-3 inline-block text-cyan-300 underline underline-offset-4" href={href("/history")}>← All runs</a>
       </div>
@@ -53,7 +60,7 @@ export default function RunDetailPage({ id, onDeleted }: { id: string; onDeleted
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div className="min-w-0">
           <a href={href("/history")} className="text-sm text-slate-400 hover:text-white">← All runs</a>
-          <h1 tabIndex={-1} className="mt-1 flex flex-wrap items-center gap-3 text-xl font-semibold focus:outline-none">
+          <h1 ref={heading} tabIndex={-1} className="mt-1 flex flex-wrap items-center gap-3 text-xl font-semibold focus:outline-none">
             <span className="truncate">{runTitle(summary)}</span>
             <StatusBadge status={summary.status} />
           </h1>
