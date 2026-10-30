@@ -174,6 +174,20 @@ def constant_speed_video(path, n_frames=40, fps=60):
     return str(path)
 
 
+def test_a_failed_search_says_the_biggest_mover_was_tracked(tmp_path):
+    # Nothing moves like a ball: motion still tracks the biggest mover, and the user must be told.
+    video = load_video(constant_speed_video(tmp_path / "c.avi"))
+    _, _, notes = track(video, TrackSettings("motion", px_per_m=PX_PER_M))
+    assert any("nothing moved like a falling, thrown or swinging ball" in n for n in notes)
+
+
+@pytest.mark.parametrize("manual", [{"auto_detect": False}, {"roi": (0, 0, 639, 479)}, {"max_jump": 60.0}])
+def test_no_search_no_failed_search_note(tmp_path, manual):
+    video = load_video(constant_speed_video(tmp_path / "c.avi"))
+    _, _, notes = track(video, TrackSettings("motion", px_per_m=PX_PER_M, **manual))
+    assert not any("nothing moved like" in n for n in notes)
+
+
 def test_the_path_that_travels_farthest_wins(tmp_path):
     det = find_ball(load_video(fall_beside_a_swing(tmp_path / "fs.avi")), PX_PER_M)
     assert det is not None and det.model == "damped_oscillation"

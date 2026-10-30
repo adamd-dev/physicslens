@@ -56,6 +56,8 @@ def _sam_client() -> Segmenter:
 
 
 NO_BALL_BOX = "SAM needs to know which object is the ball: draw a box around the ball on the first frame"
+NOT_FOUND_NOTE = ("nothing moved like a falling, thrown or swinging ball, so the biggest moving object was tracked "
+                  "(often a hand or an arm): draw a search area around the ball's path to choose it")
 START_RADIUS_BOXES = 3  # the motion fallback accepts its first blob within this many box sizes of the box
 MIN_START_RADIUS_PX = 30
 
@@ -158,15 +160,19 @@ def track(
     if s.tracker == "color":
         return "none", track_color(video, s.hsv_lower, s.hsv_upper, s.min_area, s.max_jump, max_area=s.max_area, roi=s.roi), []
     # A search area or a jump limit means the user is tracking by hand.
-    if s.roi is None and s.max_jump is None and start_box is None and (detection := _find(video, s, on_detect)):
-        return detection.fields, detection.track, [_found_note(detection)]
+    searched = s.roi is None and s.max_jump is None and start_box is None and s.auto_detect and bool(s.px_per_m)
+    notes = []
+    if searched:
+        if detection := _find(video, s, on_detect):
+            return detection.fields, detection.track, [_found_note(detection)]
+        notes = [NOT_FOUND_NOTE]
     kw: dict[str, Any] = {"min_area": s.min_area, "max_area": s.max_area or MOTION_MAX_AREA, "max_jump_px": s.max_jump, "roi": s.roi,
                           **_start(start_box)}
     if s.max_jump is None and s.px_per_m:
         kw["max_speed_px_s"] = MAX_SPEED_M_S * s.px_per_m
     if s.fields == "auto":
-        return (*field_order(video, **kw), [])
-    return s.fields, track_motion(video, fields=None if s.fields == "none" else s.fields, **kw), []
+        return (*field_order(video, **kw), notes)
+    return s.fields, track_motion(video, fields=None if s.fields == "none" else s.fields, **kw), notes
 
 
 
@@ -272,9 +278,11 @@ def wrong_object(data: TrackData, scale_rel_err: float = 0.0, results: list[dict
     return f"no fall, throw or swing fits this track (best: {best['name']} R² {r2}{g_text}). {_CAUSES}"
 
 
-
 def reusable(results: list[dict], model: str, axis: str) -> list[dict] | None:
-    """run_fits results the gate can reuse: all models, swing on x (the gate adds y); None otherwise."""
+    """run_fits results the gate can reuse: all models, swing on x (the gate adds y); None otherwise.
+
+    A forced model or axis does not cover what the gate checks, so the gate then makes its own fits.
+    """
     return results if model == "auto" and axis == "x" else None
 
 
