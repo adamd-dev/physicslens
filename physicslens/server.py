@@ -288,7 +288,11 @@ def _analyze(req: AnalyzeRequest, emit) -> None:
     before = _spent()
     emit("status", {"stage": "tracking"})
     try:
-        fields, tr, track_notes = track(video, req.settings.scaled(s, calibration.px_per_m), sam=lambda: make_sam_client())
+        fields, tr, track_notes = track(
+            video, req.settings.scaled(s, calibration.px_per_m), sam=lambda: make_sam_client(),
+            on_detect=lambda d: emit("detection", {"box": [v / s for v in d.box], "frame": d.frame, "t": float(d.track.t[0]),
+                                                  "model": d.model, "r2": d.r2}),
+        )
     except ValueError as exc:
         emit("error", {"stage": "tracking", "message": str(exc)})
         return

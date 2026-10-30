@@ -63,7 +63,7 @@ export default function SettingsPanel({ settings, options, onSettings, onOptions
 
       {settings.tracker === "sam" && (
         <p className="text-sm text-slate-400">
-          Use “Ball” under the video and box the ball on the first frame: SAM follows what you box. The analysed clip is sent to Meta's API.
+          SAM follows the ball you box with “Ball” under the video. Without a box, PhysicsLens picks what falls, flies or swings and boxes it for SAM. The analysed clip is sent to Meta's API.
         </p>
       )}
 

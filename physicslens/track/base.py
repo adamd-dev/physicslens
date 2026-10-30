@@ -4,6 +4,9 @@ from dataclasses import dataclass
 
 import numpy as np
 
+# A 10 m fall ends at 14 m/s: a blob that moved faster than this between two samples is another object.
+MAX_SPEED_M_S = 15.0
+
 
 @dataclass
 class Track:

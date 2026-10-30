@@ -50,8 +50,8 @@ def test_the_default_drops_the_passer_by_and_keeps_a_ball_hidden_for_a_while(tmp
     # and gap limit, allows the longer step after the gap and keeps both parts of the fall.
     video = load_video(drop_after_a_passer_by(tmp_path / "h.avi", hidden=range(10, 16)))
     _, tr, _ = track(video, TrackSettings("motion", px_per_m=PX_PER_M))
-    # Frames 0-4 follow the passer-by and are dropped; the ball run is frames 5-9 and 16-26, across the gap.
-    assert np.all(np.abs(tr.x - 320) < 5) and len(tr) == 16
+    # Auto-detect (scale known, no search area) follows the ball from frame 0, across the gap.
+    assert np.all(np.abs(tr.x - 320) < 5) and len(tr) == 21
 
 
 def test_an_explicit_max_jump_wins_over_the_default(tmp_path):

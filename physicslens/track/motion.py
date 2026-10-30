@@ -27,11 +27,21 @@ FLICKER_SHARE = 0.3
 JITTER_PX = 4.0
 
 
-def _samples(video: Video, fields: str | None, threshold: int):
-    """Yield (time, moving_mask, y_scale, y_offset) for each frame or field."""
+def moving_masks(video: Video, threshold: int = 40) -> np.ndarray:
+    """Per frame, the pixels that differ from the median background (flicker on static edges removed)."""
     gray = np.array([cv2.cvtColor(f, cv2.COLOR_BGR2GRAY) for f in video.frames], np.int16)
     moving = (np.abs(gray - np.median(gray, axis=0)) > threshold).astype(np.uint8)
     moving &= (moving.mean(axis=0) <= FLICKER_SHARE).astype(np.uint8)
+    return moving
+
+
+def _samples(video: Video, fields: str | None, threshold: int, moving: np.ndarray | None = None):
+    """Yield (time, moving_mask, y_scale, y_offset) for each frame or field.
+
+    `moving` (from moving_masks) can be passed in when several passes share one clip.
+    """
+    if moving is None:
+        moving = moving_masks(video, threshold)
     if fields is None:
         for mask, t in zip(moving, video.timestamps):
             yield t, mask, 1, 0

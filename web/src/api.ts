@@ -105,6 +105,7 @@ export type StreamEvent =
   | { event: "status"; data: { stage: string } }
   | { event: "video"; data: { frames: number; fps: number; scale: number; warnings: string[] } }
   | { event: "track"; data: TrackEvent }
+  | { event: "detection"; data: Detection }
   | { event: "fits"; data: { fits: unknown[] } }
   | { event: "agent_message"; data: AgentMessage }
   | { event: "result"; data: Result }
@@ -130,6 +131,9 @@ export async function uploadVideo(file: File): Promise<VideoInfo> {
 }
 
 export const videoUrl = (id: string) => `/api/videos/${id}/file`;
+
+/** The ball found from how it moves, when no box was drawn; box in source pixels on window frame `frame`. */
+export type Detection = { box: [number, number, number, number]; frame: number; t: number; model: string; r2: number };
 
 /** POST /api/analyze and hand each server-sent event to `onEvent` as it arrives. */
 export async function analyze(request: AnalyzeRequest, onEvent: (e: StreamEvent) => void, signal?: AbortSignal) {

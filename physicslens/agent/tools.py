@@ -18,7 +18,21 @@ MIN_CYCLES = 1.5  # an oscillation fit on less than this extrapolates the period
 PENDULUM_LENGTH_RANGE = (0.05, 5.0)
 MIN_COVERAGE = 0.8  # a shorter window weakens the runs test enough to hide a wrong model
 MAX_SIDEWAYS_M = 0.1  # free_fall fits y only; more x motion than this needs the projectile check
+# Looser than the checks: what a real fall, throw or swing could give at all (a wrong-object track cannot).
+GATE_R2 = 0.9
+GATE_G = (0.5 * models.G, 1.5 * models.G)
 SCALE_FREE = {"omega", "gamma", "phase"}  # per-second and angle parameters: the metre scale does not touch them
+
+
+def could_be_physics(summary: dict) -> bool:
+    """A fit summary that a real object could have produced, even if it fails the stricter checks."""
+    if summary["r2"] is None or summary["r2"] < GATE_R2:
+        return False
+    if "g" in summary["params"]:
+        g = summary["params"]["g"]
+        if g is None or not GATE_G[0] <= g <= GATE_G[1]:
+            return False
+    return "length_m" not in summary or PENDULUM_LENGTH_RANGE[0] <= summary["length_m"] <= PENDULUM_LENGTH_RANGE[1]
 
 
 @dataclass

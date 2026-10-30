@@ -64,6 +64,8 @@ def parse_args(argv=None):
     p.add_argument("--roi", type=lambda s: _numbers(s, 4, int), help="x0,y0,x1,y1 search area in full-frame pixels")
     p.add_argument("--min-area", type=int, default=10)
     p.add_argument("--max-area", type=int, help="largest blob in px (default: 2000 for motion, no limit for color)")
+    p.add_argument("--no-auto-detect", action="store_true",
+                   help="do not find the ball from how it moves; track the biggest mover (motion) or need --sam-box (sam)")
     p.add_argument("--max-jump", type=float, help=f"max px between samples before a point is rejected (default: what {MAX_SPEED_M_S:g} m/s covers at the scale)")
     p.add_argument("--capture-fps", type=float, help="real capture rate of slow-motion clips, e.g. 240")
     p.add_argument("--start", type=float, default=0.0)
@@ -147,7 +149,7 @@ def report_agent(args, data: TrackData, box: Toolbox, video_warnings: Sequence[s
 def settings(args, px_per_m: float | None = None) -> TrackSettings:
     return TrackSettings(
         args.tracker, args.hsv_lower, args.hsv_upper, args.fields, args.roi, args.min_area, args.max_area, args.max_jump,
-        sam_box=args.sam_box, sam_prompt=args.sam_prompt, px_per_m=px_per_m,
+        sam_box=args.sam_box, sam_prompt=args.sam_prompt, px_per_m=px_per_m, auto_detect=not args.no_auto_detect,
     )
 
 

@@ -7,15 +7,15 @@ from typing import Any
 
 import numpy as np
 
-from .agent.tools import PENDULUM_LENGTH_RANGE, Toolbox, TrackData
+from .agent.tools import Toolbox, TrackData, could_be_physics
 from .calibrate import Calibration
 from .ingest import Video, load_video
 from .llm.meta_client import BudgetExceededError, LLMAuthError, LLMConfigError, LLMError
-from .physics import models
-from .track.base import Track
+from .track.autodetect import Detection, find_ball
+from .track.base import MAX_SPEED_M_S, Track
 from .track.color import track_color
 from .track.motion import field_order, track_motion
-from .track.sam import SamTrackError, Segmenter, track_sam
+from .track.sam import MAX_SAM_FRAMES, SamTrackError, Segmenter, track_sam
 
 FITS = {"free_fall": "fit_free_fall", "projectile": "fit_projectile", "pendulum": "fit_pendulum"}
 MIN_VX = 0.1  # m/s; slower horizontal drift is camera tilt or tracking noise, not a throw
@@ -42,6 +42,7 @@ class TrackSettings:
     sam_box: tuple[int, int, int, int] | None = None  # around the object on the first frame; wins over the prompt
     sam_prompt: str | None = None  # explicit opt-in: text prompts miss small balls (tested 2026-10-29)
     px_per_m: float | None = None  # in decoded pixels; gives the motion tracker its default jump limit
+    auto_detect: bool = True  # find the ball from how it moves when there is no box or search area
 
 
 def _sam_client() -> Segmenter:
@@ -52,8 +53,6 @@ def _sam_client() -> Segmenter:
     return SamClient.from_env()
 
 
-# A 10 m fall ends at 14 m/s: a blob that moved faster than this between two samples is another object.
-MAX_SPEED_M_S = 15.0
 
 
 NO_BALL_BOX = "SAM needs to know which object is the ball: draw a box around the ball on the first frame"
@@ -94,25 +93,62 @@ def load(
     return video, [str(w.message) for w in caught]
 
 
+_MOTION_WORD = {"free_fall": "falling", "projectile": "thrown", "damped_oscillation": "swinging"}
+
+
+def _found_note(d: Detection) -> str:
+    note = (f"ball found automatically: the {_MOTION_WORD.get(d.model, d.model)} object from {d.track.t[0]:.2f} s "
+            f"into the analysed clip (path fit R² {d.r2:.4f}); draw a box around the ball to choose another object")
+    if d.model == "damped_oscillation":
+        note += ". A swing is often found in pieces (the bob slows at each end): a box gives the whole swing"
+    return note
+
+
+def _find(video: Video, s: TrackSettings, on_detect: Callable[[Detection], None] | None) -> Detection | None:
+    if not s.auto_detect or not s.px_per_m:
+        return None  # without a scale a fall cannot be told from a hand
+    # "none" is the default, not a choice: detection checks for interlacing itself. A field order is kept.
+    fields = s.fields if s.tracker == "motion" and s.fields in ("top", "bottom") else "auto"
+    detection = find_ball(video, s.px_per_m, fields=fields, min_area=s.min_area, max_area=s.max_area or MOTION_MAX_AREA, roi=s.roi)
+    if detection and on_detect:
+        on_detect(detection)
+    return detection
+
+
 def track(
-    video: Video, s: TrackSettings, sam: Callable[[], Segmenter] = _sam_client, start_box: tuple[int, int, int, int] | None = None
+    video: Video,
+    s: TrackSettings,
+    sam: Callable[[], Segmenter] = _sam_client,
+    start_box: tuple[int, int, int, int] | None = None,
+    on_detect: Callable[[Detection], None] | None = None,
 ) -> tuple[str, Track, list[str]]:
     """Returns (field mode used, track in pixels, notes); raises ValueError when the object is not found.
 
-    SAM needs a ball box (or an explicit text prompt); without one it is not called at all.
+    Without a ball box (SAM) or a search area or jump limit (motion), the ball is found automatically from how it
+    moves (track.autodetect), when the scale is known; `on_detect` sees what was found.
+    SAM with neither a box nor an explicit text prompt is not called at all.
     When SAM 3.1 cannot track a boxed ball (no key, API error, budget, nothing found) the motion
     tracker takes over from the box and a note says why: the result is never silently from another
     tracker. A failed text prompt has no box to start from, so it is an error, not a blind fallback.
     """
     if s.tracker == "sam":
-        if s.sam_box is None and not s.sam_prompt:
-            raise ValueError(NO_BALL_BOX)
+        box, box_frame, detection = s.sam_box, 0, None
+        if box is None and not s.sam_prompt:
+            if len(video.frames) > MAX_SAM_FRAMES:  # before the search: SAM would refuse the clip anyway
+                raise ValueError(f"the window has {len(video.frames)} frames; SAM takes at most {MAX_SAM_FRAMES}: set a start and end")
+            detection = _find(video, s, on_detect)
+            if detection is None:
+                raise ValueError(NO_BALL_BOX if not s.px_per_m else f"{NO_BALL_BOX}; nothing in the clip moves like a falling, thrown or swinging ball")
+            box, box_frame = detection.box, detection.frame
+        notes = [_found_note(detection)] if detection else []
         try:
-            prompt = None if s.sam_box else s.sam_prompt
-            return "none", track_sam(video, sam(), box=s.sam_box, prompt=prompt, roi=s.roi), []
+            prompt = None if box else s.sam_prompt
+            return "none", track_sam(video, sam(), box=box, prompt=prompt, roi=s.roi, box_frame=box_frame), notes
         except (LLMError, SamTrackError, OSError) as exc:
-            if s.sam_box is None:
+            if box is None:
                 raise ValueError(f"{_sam_why(exc)}. {NO_BALL_BOX}") from exc
+            if detection:
+                return detection.fields, detection.track, [*notes, f"{_sam_why(exc)}. Used the motion path that was found instead"]
             note = _sam_note(exc)
             try:
                 fields, tr, _ = track(video, replace(s, tracker="motion"), start_box=s.sam_box)
@@ -121,6 +157,9 @@ def track(
             return fields, tr, [note]
     if s.tracker == "color":
         return "none", track_color(video, s.hsv_lower, s.hsv_upper, s.min_area, s.max_jump, max_area=s.max_area, roi=s.roi), []
+    # A search area or a jump limit means the user is tracking by hand.
+    if s.roi is None and s.max_jump is None and start_box is None and (detection := _find(video, s, on_detect)):
+        return detection.fields, detection.track, [_found_note(detection)]
     kw: dict[str, Any] = {"min_area": s.min_area, "max_area": s.max_area or MOTION_MAX_AREA, "max_jump_px": s.max_jump, "roi": s.roi,
                           **_start(start_box)}
     if s.max_jump is None and s.px_per_m:
@@ -203,11 +242,6 @@ def to_track_data(tr: Track, calibration: Calibration) -> TrackData:
     return TrackData(tr.t - tr.t[0], calibration.to_meters(tr.x), calibration.to_meters(tr.y))
 
 
-# The gate only stops tracks no model could describe; anything that might be physics goes to the agent.
-GATE_R2 = 0.9
-GATE_G = (0.5 * models.G, 1.5 * models.G)
-
-
 def wrong_object(data: TrackData, scale_rel_err: float = 0.0) -> str | None:
     """Why no measurement is possible, when no fall, throw or swing fits the track; None otherwise.
 
@@ -217,7 +251,7 @@ def wrong_object(data: TrackData, scale_rel_err: float = 0.0) -> str | None:
     box = Toolbox(data, scale_rel_err=scale_rel_err)
     results = run_fits(box) + run_fits(box, "pendulum", axis="y")  # a swing can read mainly on either axis
     fitted = [r for r in results if "error" not in r]
-    if not fitted or any(r["check"]["ok"] or _could_be_physics(r) for r in fitted):
+    if not fitted or any(r["check"]["ok"] or could_be_physics(r) for r in fitted):
         return None
     best = max(fitted, key=lambda r: -np.inf if r["r2"] is None else r["r2"])
     r2 = "undefined" if best["r2"] is None else f"{best['r2']:.2f}"
@@ -229,15 +263,6 @@ def wrong_object(data: TrackData, scale_rel_err: float = 0.0) -> str | None:
         "the scale is wrong, or the time is off (a slow-motion clip needs its capture frame rate)."
     )
 
-
-def _could_be_physics(r: dict) -> bool:
-    if r["r2"] is None or r["r2"] < GATE_R2:
-        return False
-    if "g" in r["params"]:
-        g = r["params"]["g"]
-        if g is None or not GATE_G[0] <= g <= GATE_G[1]:
-            return False
-    return "length_m" not in r or PENDULUM_LENGTH_RANGE[0] <= r["length_m"] <= PENDULUM_LENGTH_RANGE[1]
 
 
 def run_fits(box: Toolbox, model: str = "auto", axis: str = "x") -> list[dict]:

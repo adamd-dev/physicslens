@@ -55,12 +55,12 @@ TEXT_PROMPT_PATTERN = r"^[A-Za-z0-9 ,.'-]+$"
 MAX_TEXT_PROMPT = 80
 
 
-def box_prompt(box, width: int, height: int) -> str:
-    """Object prompt on frame 0: inclusive integer box in the clip's pixels, clipped to the frame."""
+def box_prompt(box, width: int, height: int, frame: int = 0) -> str:
+    """Object prompt on `frame`: inclusive integer box in the clip's pixels, clipped to the frame."""
     x1, y1, x2, y2 = (round(v) for v in box)
     x1, x2 = sorted((min(max(x1, 0), width - 1), min(max(x2, 0), width - 1)))
     y1, y2 = sorted((min(max(y1, 0), height - 1), min(max(y2, 0), height - 1)))
-    return f"<0f>1<|box;x1={x1};y1={y1};x2={x2};y2={y2};w={width};h={height}|>"
+    return f"<{frame}f>1<|box;x1={x1};y1={y1};x2={x2};y2={y2};w={width};h={height}|>"
 
 
 def parse_frames(text: str) -> dict[int, dict[int, Box]]:
@@ -89,17 +89,18 @@ def _iou(a, b) -> float:
     return inter / union if union > 0 else 0.0
 
 
-def pick_object(frames: dict[int, dict[int, Box]], roi=None, prompt_box=None) -> int | None:
+def pick_object(frames: dict[int, dict[int, Box]], roi=None, prompt_box=None, prompt_frame: int = 0) -> int | None:
     """Which SAM object is the ball.
 
-    With a box prompt: the object that best overlaps the box in the first frame it appears.
+    With a box prompt: the object that best overlaps the box on the prompt's frame (or, if SAM
+    returned nothing there, the nearest frame it did return: the ball moves between frames).
     With a text prompt: objects that move beat still ones (a ball lying in the background is seen
     in every frame but never moves), then the one seen in the most frames inside the search area.
     """
     if prompt_box is not None:
         if not frames:
             return None
-        first = frames[min(frames)]
+        first = frames[min(frames, key=lambda i: (abs(i - prompt_frame), i))]
         best = max(first, key=lambda oid: _iou(first[oid], prompt_box))
         # Nothing where the user boxed: say so rather than follow some other object.
         return best if _iou(first[best], prompt_box) > 0 else None
@@ -120,14 +121,18 @@ def pick_object(frames: dict[int, dict[int, Box]], roi=None, prompt_box=None) ->
     return max(paths, key=rank)
 
 
-def track_sam(video: Video, client: Segmenter, box=None, prompt: str | None = None, roi=None) -> Track:
-    """Track one object with SAM 3.1; raises SamTrackError (with what to try) when it is not followed."""
+def track_sam(video: Video, client: Segmenter, box=None, prompt: str | None = None, roi=None, box_frame: int = 0) -> Track:
+    """Track one object with SAM 3.1; raises SamTrackError (with what to try) when it is not followed.
+
+    `box_frame`: the frame the box is on. After frame 0, SAM tracks both ways from it (tested 2026-10-29).
+    """
     n = len(video.frames)
     if n > MAX_SAM_FRAMES:
         raise SamTrackError(f"the window has {n} frames; SAM takes at most {MAX_SAM_FRAMES}: set a start and end")
     h, w = video.frames[0].shape[:2]
     if box is not None:
-        request, direction, wanted = box_prompt(box, w, h), "forward", "the boxed object"
+        direction = "forward" if box_frame == 0 else "both"
+        request, wanted = box_prompt(box, w, h, box_frame), "the boxed object"
     elif prompt and prompt.strip():
         request, direction, wanted = prompt.strip(), "both", repr(prompt.strip())
     else:
@@ -136,7 +141,7 @@ def track_sam(video: Video, client: Segmenter, box=None, prompt: str | None = No
     if frames and max(frames) >= n:
         # Our frame N is SAM's frame N only if it decoded exactly our frames; anything else would mistime every point.
         raise SamTrackError(f"SAM returned frame {max(frames)}, beyond the clip's {n} frames: the frame mapping is off")
-    oid = pick_object(frames, roi, prompt_box=box)
+    oid = pick_object(frames, roi, prompt_box=box, prompt_frame=box_frame)
     if oid is None:
         raise SamTrackError(f"SAM found no {wanted} in the clip; draw a box around the ball on the first frame")
     ns = sorted(i for i, objects in frames.items() if oid in objects)

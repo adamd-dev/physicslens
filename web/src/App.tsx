@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
-import type { AgentMessage, Point, Result, Settings, StreamEvent, TrackEvent, VideoInfo } from "./api";
+import type { AgentMessage, Detection, Point, Result, Settings, StreamEvent, TrackEvent, VideoInfo } from "./api";
 import { analyze, uploadVideo } from "./api";
 import AgentTimeline from "./components/AgentTimeline";
 import ResultCard from "./components/ResultCard";
@@ -21,6 +21,7 @@ const DEFAULT_SETTINGS: Settings = {
   sam_box: null,
 };
 const DEFAULT_OPTIONS: Options = { start: 0, end: null, capture_fps: null, model: "auto", axis: "x", agent: true, height_m: null, detect_release: true };
+const MOTION_WORD: Record<string, string> = { free_fall: "falling", projectile: "thrown", damped_oscillation: "swinging" };
 const TRACKERS: Record<string, string> = { motion: "motion", color: "color", sam: "SAM 3.1" };
 const STAGES: Record<string, string> = { loading: "Loading frames", tracking: "Tracking the ball", fitting: "Fitting models", agent: "Muse is reasoning" };
 
@@ -43,6 +44,7 @@ export default function App() {
   const [cost, setCost] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [warnings, setWarnings] = useState<string[]>([]);
+  const [detection, setDetection] = useState<Detection | null>(null);
   const abort = useRef<AbortController | null>(null);
 
   const reset = () => {
@@ -52,6 +54,7 @@ export default function App() {
     setCost(null);
     setError(null);
     setWarnings([]);
+    setDetection(null);
   };
 
   const onFile = async (file: File) => {
@@ -80,9 +83,13 @@ export default function App() {
       case "video":
         setWarnings(e.data.warnings);
         break;
+      case "detection":
+        setDetection(e.data);
+        break;
       case "track":
         setTrack(e.data);
-        setWarnings((w) => [...w, ...(e.data.notes ?? [])]);
+        // The auto-detect note is shown as information below, not as a warning.
+        setWarnings((w) => [...w, ...(e.data.notes ?? []).filter((n) => !n.startsWith("ball found automatically"))]);
         break;
       case "agent_message":
         setMessages((m) => [...m, e.data]);
@@ -197,7 +204,7 @@ export default function App() {
               <SettingsPanel settings={settings} options={options} onSettings={setSettings} onOptions={setOptions} />
               <button
                 className="btn min-h-10 w-full bg-gradient-to-r from-cyan-400 to-violet-500 text-base font-semibold text-slate-950 hover:brightness-110"
-                disabled={!calibrated || (sam && !ballBox) || running}
+                disabled={!calibrated || running}
                 aria-busy={running}
                 onClick={run}
               >
@@ -218,6 +225,12 @@ export default function App() {
                 {error}
                 {/* The API may have been paid for before the run failed: say so. */}
                 {cost != null && cost > 0 && !result && <div className="mt-1 font-mono text-rose-300/80">API cost of this run: ${cost.toFixed(3)}</div>}
+              </div>
+            )}
+            {detection && (
+              <div className="rounded-xl border border-cyan-500/30 bg-cyan-500/5 p-3 text-sm text-cyan-100">
+                Ball found automatically: the {MOTION_WORD[detection.model] ?? detection.model} object, from {detection.t.toFixed(2)} s into the
+                analysed clip, box {detection.box.map((v) => Math.round(v)).join(", ")} px. Wrong object? Use “Ball” under the video to box the right one.
               </div>
             )}
             {warnings.map((w, i) => (
@@ -259,7 +272,7 @@ function Checklist({ calibrated, roi, ballBox }: { calibrated: boolean; roi: boo
     <ul className="space-y-2 text-sm">
       {item(true, "Video loaded")}
       {item(calibrated, "Scale: click both ends of a ruler")}
-      {ballBox !== null && item(ballBox, "Ball: box it on the first frame (SAM needs it)")}
+      {ballBox !== null && item(ballBox, "Ball box on the first frame (else found from how it moves)", true)}
       {item(roi, "Search area around the ball", true)}
     </ul>
   );

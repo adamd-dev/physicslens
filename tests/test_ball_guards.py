@@ -9,6 +9,7 @@ from physicslens import server
 from physicslens.ingest import load_video
 from physicslens.physics import models
 from physicslens.pipeline import TrackSettings, track
+from tests.test_agent_gate import wandering_video
 from tests.test_robustness import PX_PER_M
 from tests.test_sam import FakeSam, drop_video
 from tests.test_server import analyze, client, upload_drop  # noqa: F401  (client is a fixture)
@@ -78,8 +79,11 @@ def test_the_box_seeds_only_the_sam_fallback(tmp_path):
 
 
 def test_api_sam_without_a_box_is_an_error_and_costs_nothing(client, tmp_path, monkeypatch):  # noqa: F811
+    # Nothing in this clip moves like a ball, so auto-detect finds no box either.
     monkeypatch.setattr(server, "make_sam_client", never_called)
-    stream = dict(analyze(client, upload_drop(client, tmp_path), settings={"tracker": "sam"}))
+    with open(wandering_video(tmp_path / "w.avi"), "rb") as f:
+        video_id = client.post("/api/videos", files={"file": ("w.avi", f, "video/x-msvideo")}).json()["video_id"]
+    stream = dict(analyze(client, video_id, settings={"tracker": "sam"}))
     assert "result" not in stream
     assert stream["error"]["stage"] == "tracking" and "box around the ball" in stream["error"]["message"]
 
@@ -97,5 +101,5 @@ def test_cli_rejects_a_prompt_the_api_would_reject(tmp_path, prompt, capsys):
 
 def test_cli_sam_without_a_box_fails_before_any_call(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(cli, "make_sam_client", never_called)
-    assert cli.main([str(drop_video(tmp_path)), "--px-per-m", "300", "--tracker", "sam"]) == 2
+    assert cli.main([wandering_video(tmp_path / "w.avi"), "--px-per-m", "300", "--tracker", "sam"]) == 2
     assert "box around the ball" in capsys.readouterr().err
