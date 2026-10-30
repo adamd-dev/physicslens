@@ -230,7 +230,11 @@ export default function App() {
             {detection && (
               <div className="rounded-xl border border-cyan-500/30 bg-cyan-500/5 p-3 text-sm text-cyan-100">
                 Ball found automatically: the {MOTION_WORD[detection.model] ?? detection.model} object, from {detection.t.toFixed(2)} s into the
-                analysed clip, box {detection.box.map((v) => Math.round(v)).join(", ")} px. Wrong object? Use “Ball” under the video to box the right one.
+                analysed clip, box {detection.box.map((v) => Math.round(v)).join(", ")} px.{" "}
+                {sam ? "Wrong object? Use “Ball” under the video to box the right one." : "Wrong object? Draw a “Search area” around the ball's path."}
+                {detection.model === "damped_oscillation" && (
+                  <> A swing is often found in pieces (the bob slows at each end): {sam ? "a ball box" : "a search area"} gives the whole swing.</>
+                )}
               </div>
             )}
             {warnings.map((w, i) => (

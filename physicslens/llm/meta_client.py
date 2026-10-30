@@ -157,9 +157,12 @@ def check_base_url(base_url: str, extra_hosts=frozenset()) -> str:
     return base_url.rstrip("/")
 
 
+DEFAULT_MAX_USD = 5.0  # total logged spend allowed when PHYSICSLENS_MAX_USD is not set
+
+
 def _parse_budget(value: str | None) -> float | None:
     if not value:
-        return None
+        return DEFAULT_MAX_USD  # a fresh clone never spends without a limit
     try:
         budget = float(value)
     except ValueError:

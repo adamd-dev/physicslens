@@ -165,3 +165,16 @@ def test_non_dict_message_is_a_response_error(tmp_path, message):
 def test_invalid_json_arguments_are_not_echoed_to_the_api():
     wire = to_wire_messages([Message("assistant", "", tool_calls=[{"id": "c", "name": "x", "arguments": "{oops"}])])
     assert wire[0]["tool_calls"][0]["function"]["arguments"] == "{}"
+
+
+def test_a_fresh_clone_has_a_spend_cap():
+    # No PHYSICSLENS_MAX_USD anywhere: a default cap, never unlimited spend.
+    from physicslens.llm.meta_client import DEFAULT_MAX_USD
+
+    c = MetaClient.from_env(env={"MODEL_API_KEY": KEY}, dotenv_path="/nonexistent")
+    assert c.max_usd == DEFAULT_MAX_USD == 5.0
+
+
+def test_an_explicit_budget_still_wins():
+    c = MetaClient.from_env(env={"MODEL_API_KEY": KEY, "PHYSICSLENS_MAX_USD": "12"}, dotenv_path="/nonexistent")
+    assert c.max_usd == 12.0

@@ -58,7 +58,7 @@ function brief(step: Step): { text: string; tone: "ok" | "flag" | "error" | "inf
       .filter(([k]) => ["g", "vx", "omega"].includes(k))
       .map(([k, v]) => `${k} = ${v?.toFixed(3)}`);
     const extra = r.length_m != null ? [`L = ${(r.length_m as number).toFixed(3)} m`] : [];
-    return { text: [...params, ...extra, `R² ${(r.r2 as number)?.toFixed(4)}`, `${r.n_points} pts`].join(" · "), tone: "info" };
+    return { text: [...params, ...extra, `R² ${r.r2 == null ? "n/a" : (r.r2 as number).toFixed(4)}`, `${r.n_points} pts`].join(" · "), tone: "info" };
   }
   if ("n_points" in r) return { text: `${r.n_points} points · ${r.duration_s} s · x ${r.x_span_m} m · y ${r.y_span_m} m`, tone: "info" };
   if ("landing_distance_m" in r) return { text: `lands ${(r.landing_distance_m as number).toFixed(3)} m away`, tone: "info" };

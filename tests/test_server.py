@@ -156,3 +156,13 @@ def test_frame_endpoint_returns_jpeg(client, tmp_path):
     response = client.get(f"/api/videos/{upload_drop(client, tmp_path)}/frame", params={"t": 0.1})
     assert response.status_code == 200 and response.headers["content-type"] == "image/jpeg"
     assert response.content[:2] == b"\xff\xd8"
+
+
+def test_a_failed_landing_prediction_is_said_not_shown_as_a_point(client, tmp_path, monkeypatch):
+    # The UI reads landing.landing_distance_m: an {"error": ...} there crashed the result card.
+    from physicslens.agent.tools import Toolbox
+
+    original = Toolbox.call
+    monkeypatch.setattr(Toolbox, "call", lambda self, name, args: {"error": "never lands"} if name == "predict_landing" else original(self, name, args))
+    result = dict(analyze(client, upload_drop(client, tmp_path), model="projectile", height_m=1.0))["result"]
+    assert "landing" not in result and result["landing_error"] == "never lands"

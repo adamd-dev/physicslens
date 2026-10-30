@@ -40,7 +40,7 @@ export default function ResultCard({ result, cost }: { result: Result; cost: num
           <div>
             <Quantity name="gravity g" value={p.g} err={s.g} unit="m/s²" note={dev != null ? `${Math.abs(dev).toFixed(1)}% from ${G}` : undefined} />
             {fitErr != null && (
-              <div className="text-xs text-slate-500">
+              <div className="text-xs text-slate-400">
                 ± = fit {fitErr.toFixed(3)} and scale {(Math.abs(p.g) * result.scale_rel_err).toFixed(3)} · perspective not included
               </div>
             )}
@@ -52,11 +52,17 @@ export default function ResultCard({ result, cost }: { result: Result; cost: num
         {result.landing && (
           <Quantity name="predicted landing" value={result.landing.landing_distance_m} err={result.landing.uncertainty_m} unit="m" note={`flight ${result.landing.flight_time_s.toFixed(3)} s`} />
         )}
+        {result.landing_error && (
+          <div>
+            <div className="label">predicted landing</div>
+            <div className="mt-1 text-sm text-amber-200">not predicted: {result.landing_error}</div>
+          </div>
+        )}
       </div>
 
       <div className="mt-4 flex flex-wrap gap-x-4 gap-y-1 font-mono text-sm text-slate-400">
-        <span>R² {result.r2?.toFixed(5)}</span>
-        <span>RMSE {(result.rmse_m * 1000).toFixed(2)} mm</span>
+        <span>R² {result.r2 == null ? "n/a" : result.r2.toFixed(5)}</span>
+        <span>RMSE {result.rmse_m == null ? "n/a" : `${(result.rmse_m * 1000).toFixed(2)} mm`}</span>
         {result.check.runs_z != null && <span>runs z {result.check.runs_z}</span>}
         {cost != null && <span className="ml-auto">{cost === 0 ? "cached · $0" : `$${cost.toFixed(4)}`}</span>}
       </div>

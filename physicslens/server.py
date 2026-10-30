@@ -355,7 +355,9 @@ def _analyze(req: AnalyzeRequest, emit) -> None:
 
     result = {**_result(box, fit_id, calibration.px_per_m, t_offset, video.time_scale, check), **extra}
     if req.height_m and result["model"] == "projectile":
-        result["landing"] = box.call("predict_landing", {"fit_id": fit_id, "height_m": req.height_m})
+        landing = box.call("predict_landing", {"fit_id": fit_id, "height_m": req.height_m})
+        # A failed prediction is said, never shown as a landing point (the UI would read missing numbers).
+        result["landing" if "error" not in landing else "landing_error"] = landing.get("error", landing)
     emit("result", result)
 
 

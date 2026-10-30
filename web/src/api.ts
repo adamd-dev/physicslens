@@ -83,12 +83,13 @@ export interface Result {
   scale_rel_err: number;
   deviation_pct: { g?: number };
   r2: number | null;
-  rmse_m: number;
+  rmse_m: number | null; // null when not finite
   check: Check;
   curve: { t_play: number[]; x_px: number[]; y_px: number[] };
   length_m?: number;
   period_s?: number;
   landing?: Landing;
+  landing_error?: string; // why no landing point could be predicted
   source: "agent" | "deterministic";
   summary?: string;
   steps?: number;
@@ -133,7 +134,7 @@ export async function uploadVideo(file: File): Promise<VideoInfo> {
 export const videoUrl = (id: string) => `/api/videos/${id}/file`;
 
 /** The ball found from how it moves, when no box was drawn; box in source pixels on window frame `frame`. */
-export type Detection = { box: [number, number, number, number]; frame: number; t: number; model: string; r2: number };
+export type Detection = { box: [number, number, number, number]; frame: number; t: number; model: string; r2: number | null };
 
 /** POST /api/analyze and hand each server-sent event to `onEvent` as it arrives. */
 export async function analyze(request: AnalyzeRequest, onEvent: (e: StreamEvent) => void, signal?: AbortSignal) {
