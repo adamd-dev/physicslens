@@ -4,7 +4,9 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 // No silent default: a wrong host would land in the canonical link, og tags, sitemap and JSON-LD.
-const site = (process.env.SITE_URL || "").replace(/\/$/, "");
+// SITE_URL wins; on Vercel the project's production domain is known at build time.
+const vercel = process.env.VERCEL_PROJECT_PRODUCTION_URL;
+const site = (process.env.SITE_URL || (vercel ? `https://${vercel}` : "")).replace(/\/$/, "");
 if (!/^https:\/\/[^/]+$/.test(site)) {
   console.error(`SITE_URL must be the public https origin, e.g. SITE_URL=https://example.vercel.app (got "${site}")`);
   process.exit(1);
