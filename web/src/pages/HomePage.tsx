@@ -23,7 +23,7 @@ function Section({ id, label, title, children }: { id: string; label: string; ti
  *  `appUrl` (public page) is where the online app lives. */
 export default function HomePage({ local = true, appUrl }: { local?: boolean; appUrl?: string }) {
   const heading = useFocusHeading(local); // a page opened from a link keeps the browser's own focus
-  const appLink = (path: string) => (local ? href(path) : appUrl ? `${appUrl}/${href(path)}` : "#get-the-code");
+  const appLink = (path: string) => (local ? href(path) : appUrl ? `${appUrl}${href(path)}` : "#get-the-code");
   return (
     <div>
       <section className="grid items-center gap-8 pb-12 pt-4 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] lg:py-16">

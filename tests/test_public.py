@@ -79,3 +79,12 @@ def test_the_port_can_come_from_the_host(monkeypatch):
     monkeypatch.setenv("PHYSICSLENS_PORT", "7860")
     server.main()
     assert calls["port"] == 7860
+
+
+def test_a_silent_step_keeps_the_stream_alive(client, tmp_path, monkeypatch):  # noqa: F811
+    # Proxies (a Cloudflare tunnel) cut a response that says nothing for ~100 s; SAM or an agent step can.
+    monkeypatch.setattr(server, "KEEPALIVE_S", 0.05)
+    monkeypatch.setattr(server, "_analyze", lambda req, emit: time.sleep(0.3))
+    video = upload_drop(client, tmp_path)
+    response = client.post("/api/analyze", json={"video_id": video, "scale": {"px_per_m": 300}})
+    assert ": keepalive\n\n" in response.text and response.text.rstrip().endswith("data: {}")

@@ -1,7 +1,8 @@
 import HomePage from "../pages/HomePage";
 
-// The online app (a Hugging Face Space); VITE_APP_URL at build time overrides it, an empty value points to the code.
-const APP_URL = ((import.meta.env.VITE_APP_URL as string | undefined) ?? "https://adamd-dev-physicslens.hf.space").replace(/\/$/, "") || undefined;
+// The online app. "/app" is a redirect in vercel.json to wherever it runs now (deploy/tunnel.sh updates it),
+// so this page never changes when the app moves; VITE_APP_URL overrides it, an empty value points to the code.
+const APP_URL = ((import.meta.env.VITE_APP_URL as string | undefined) ?? "/app").replace(/\/$/, "") || undefined;
 
 /** The public page: the Home content without the parts that need the local server (runs, analysis). */
 export default function Landing() {
@@ -15,7 +16,7 @@ export default function Landing() {
           </a>
           <nav aria-label="Sections">
             <ul className="flex flex-wrap items-center gap-1 text-sm">
-              {[["#how-it-works", "How it works"], ["#results", "Results"], ["#faq", "FAQ"], ["https://github.com/adamd-dev/physicslens", "Code"], ...(APP_URL ? [[`${APP_URL}/#/analyze`, "Open the app"]] : [])].map(([to, label]) => (
+              {[["#how-it-works", "How it works"], ["#results", "Results"], ["#faq", "FAQ"], ["https://github.com/adamd-dev/physicslens", "Code"], ...(APP_URL ? [[`${APP_URL}#/analyze`, "Open the app"]] : [])].map(([to, label]) => (
                 <li key={to}>
                   <a href={to} className="inline-flex min-h-10 items-center rounded-lg px-3 text-slate-400 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400">{label}</a>
                 </li>

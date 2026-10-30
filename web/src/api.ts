@@ -163,6 +163,7 @@ export async function analyze(request: AnalyzeRequest, onEvent: (e: StreamEvent)
         if (line.startsWith("event: ")) event = line.slice(7);
         else if (line.startsWith("data: ")) data += line.slice(6);
       }
+      if (!data && event === "message") continue; // a keep-alive comment, not an event
       onEvent({ event, data: JSON.parse(data || "{}") } as StreamEvent);
     }
   }

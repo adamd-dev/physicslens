@@ -55,6 +55,7 @@ RUNS = PROJECT_ROOT / "cache" / "runs"  # one JSON file per analysis: the Histor
 PUBLIC = os.environ.get("PHYSICSLENS_PUBLIC") == "1"  # the UI says that videos and runs are visible to everyone
 MAX_UPLOAD_BYTES = int(os.environ.get("PHYSICSLENS_MAX_UPLOAD_MB", "500")) * 1024 * 1024
 MAX_UPLOADS = int(os.environ.get("PHYSICSLENS_MAX_UPLOADS", "0"))  # newest videos kept; 0: all of them
+KEEPALIVE_S = 15.0  # a tunnel or proxy closes a response silent for ~100 s
 VIDEO_TYPES = {".mp4": "video/mp4", ".m4v": "video/mp4", ".mov": "video/quicktime", ".webm": "video/webm",
                ".avi": "video/x-msvideo", ".mkv": "video/x-matroska"}
 _ID = re.compile(r"[0-9a-f]{32}")
@@ -542,7 +543,14 @@ def analyze(req: AnalyzeRequest) -> StreamingResponse:
     threading.Thread(target=work, daemon=True).start()
 
     def stream():
-        while (item := events.get()) is not None:
+        while True:
+            try:
+                item = events.get(timeout=KEEPALIVE_S)
+            except queue.Empty:
+                yield ": keepalive\n\n"  # an SSE comment: proxies see traffic during a long silent step
+                continue
+            if item is None:
+                return
             yield item
 
     return StreamingResponse(stream(), media_type="text/event-stream", headers={"Cache-Control": "no-cache"})
