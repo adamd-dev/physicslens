@@ -32,7 +32,7 @@ ax.set_xlabel("t (s)", color=MUTED, fontsize=13)
 ax.set_ylabel("fall (m)", color=MUTED, fontsize=13)
 
 fig.text(0.05, 0.80, "ϕ  PhysicsLens", color=INK, fontsize=26, weight="bold")
-fig.text(0.05, 0.60, "Measure gravity with\nyour phone.", color=INK, fontsize=42, weight="bold", va="top", linespacing=1.05)
+fig.text(0.05, 0.60, "Measure gravity\nwith your phone.", color=INK, fontsize=40, weight="bold", va="top", linespacing=1.05)
 # The headline number is the real BallDrop measurement; the plot beside it is an illustration.
 fig.text(0.05, 0.30, "g = 9.728 m/s²", color=DATA, fontsize=34, family="monospace")
 fig.text(0.05, 0.16, "tracked by Meta SAM 3.1 · fitted with SciPy\nchecked by a Meta Muse Spark agent", color=MUTED, fontsize=14, linespacing=1.4)
