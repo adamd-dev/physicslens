@@ -137,3 +137,8 @@ def test_video_info_rebuilds_what_the_stage_needs(client, tmp_path):  # noqa: F8
     info = client.get(f"/api/videos/{video}/info").json()
     assert info["video_id"] == video and info["name"] == "drop.avi" and info["width"] == 640 and info["fps"] > 0
     assert client.get(f"/api/videos/{'0' * 32}/info").status_code == 404
+
+
+def test_the_api_is_never_indexed(client):  # noqa: F811
+    # The local app holds personal runs; a crawler that ever reached it must not index the API.
+    assert client.get("/api/runs").headers["x-robots-tag"] == "noindex, nofollow"

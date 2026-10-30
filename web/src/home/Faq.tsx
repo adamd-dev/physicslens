@@ -29,7 +29,7 @@ export default function Faq() {
         <details key={item.q} className="group py-4">
           <summary className="flex cursor-pointer list-none items-center justify-between gap-4 font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400">
             <h3>{item.q}</h3>
-            <span aria-hidden="true" className="text-slate-400 transition group-open:rotate-45">+</span>
+            <span aria-hidden="true" className="text-slate-400 transition-transform duration-[var(--dur-fast)] group-open:rotate-45">+</span>
           </summary>
           <p className="mt-2 max-w-3xl text-sm leading-relaxed text-slate-400">{item.a}</p>
         </details>

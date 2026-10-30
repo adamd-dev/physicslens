@@ -21,7 +21,7 @@ function Section({ id, label, title, children }: { id: string; label: string; ti
 
 /** Home: what PhysicsLens does, shown with the physics itself. `local` adds the parts that need the local server. */
 export default function HomePage({ local = true }: { local?: boolean }) {
-  const heading = useFocusHeading();
+  const heading = useFocusHeading(local); // a page opened from a link keeps the browser's own focus
   const appLink = (path: string) => (local ? href(path) : "#get-the-code");
   return (
     <div>
@@ -55,7 +55,8 @@ export default function HomePage({ local = true }: { local?: boolean }) {
 
       <Section id="results" label="Results" title="How accurate is it?">
         <AccuracyRuler />
-        <table className="readout mt-6 w-full text-left text-sm">
+        <div className="mt-6 overflow-x-auto" tabIndex={0} role="region" aria-label="Accuracy table">
+        <table className="readout w-full min-w-[560px] text-left text-sm">
           <caption className="mb-2 text-left font-sans text-sm text-slate-400">
             Measured from video against the reference. Two clips, not a benchmark; ± is the fit (and scale reading where stated), perspective not included.
           </caption>
@@ -71,7 +72,7 @@ export default function HomePage({ local = true }: { local?: boolean }) {
           <tbody className="divide-y divide-slate-800 text-slate-200">
             {G_BENCH.map((r) => (
               <tr key={r.label}>
-                <td className="py-2 font-sans">{r.label}</td>
+                <th scope="row" className="py-2 font-sans font-normal">{r.label}</th>
                 <td>g</td>
                 <td>{r.value.toFixed(3)} m/s²</td>
                 <td>{G} m/s²</td>
@@ -80,7 +81,7 @@ export default function HomePage({ local = true }: { local?: boolean }) {
             ))}
             {L_BENCH.map((r) => (
               <tr key={r.label}>
-                <td className="py-2 font-sans">{r.label}</td>
+                <th scope="row" className="py-2 font-sans font-normal">{r.label}</th>
                 <td>length L</td>
                 <td>{r.value.toFixed(3)} m</td>
                 <td>{L_TAPE.toFixed(2)} m (tape)</td>
@@ -89,6 +90,7 @@ export default function HomePage({ local = true }: { local?: boolean }) {
             ))}
           </tbody>
         </table>
+        </div>
         <p className="mt-3 text-xs text-slate-400">
           Pendulum clip: “Fadenpendelgeschwindigkeit (2 grad)” by Mathe-AC Lernwerkstatt Aachen, Wikimedia Commons, CC BY 4.0. BallDrop: Open Source Physics Tracker sample.
         </p>

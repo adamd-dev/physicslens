@@ -68,11 +68,13 @@ export default function HeroFit() {
   const rand = useRef(mulberry32(SEED));
   const plan = useRef<{ full: ReturnType<typeof sampleFlight>; flight: Flight; clock: number; hold: number; next: "drop" | "throw" } | null>(null);
   const drag = useRef<{ x: number; y: number; px: number; py: number } | null>(null);
+  const speak = useRef(false);
 
   const start = useCallback(
-    (launch: Launch, next: "drop" | "throw") => {
+    (launch: Launch, next: "drop" | "throw", byUser = false) => {
       const full = sampleFlight(launch, rand.current);
       const flight: Flight = { launch, t: [], x: [], y: [], gHistory: [], done: false };
+      speak.current = byUser; // the self-running loop never talks; a launch the user asked for does
       if (reduced) {
         // Less motion: the finished fit at once, no animation.
         flight.t = full.t;
@@ -208,7 +210,7 @@ export default function HeroFit() {
         if (f.t.length >= p.full.t.length) {
           f.done = true;
           const fit = fitFall(f.t, f.y);
-          if (fit) {
+          if (fit && speak.current) {
             const off = (100 * (fit.g - G)) / G;
             setAnnounce(`Fit from ${f.t.length} points: g = ${fit.g.toFixed(2)} ± ${fit.gErr.toFixed(2)} metres per second squared, ${Math.abs(off).toFixed(1)}% ${off < 0 ? "below" : "above"} 9.81.`);
           }
@@ -236,7 +238,7 @@ export default function HeroFit() {
 
   const launchAim = () => {
     const a = (aim.angle * Math.PI) / 180;
-    start({ x0: 0.25, y0: 0.95, vx: aim.speed * Math.cos(a), vy: -aim.speed * Math.sin(a) }, "drop");
+    start({ x0: 0.25, y0: 0.95, vx: aim.speed * Math.cos(a), vy: -aim.speed * Math.sin(a) }, "drop", true);
   };
 
   // Pointer: drag back and release to throw from the launch point; a tap throws towards the tap.
@@ -248,6 +250,7 @@ export default function HeroFit() {
   const onPointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
     const { px, py } = toWorld(e);
     drag.current = { x: px, y: py, px, py };
+    e.currentTarget.style.touchAction = "none"; // a pull-back must not scroll the page
     e.currentTarget.setPointerCapture(e.pointerId);
   };
   const onPointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
@@ -258,6 +261,7 @@ export default function HeroFit() {
   const onPointerUp = (e: React.PointerEvent<HTMLCanvasElement>) => {
     const d = drag.current;
     drag.current = null;
+    e.currentTarget.style.touchAction = "pan-y";
     if (!d) return;
     const r = e.currentTarget.getBoundingClientRect();
     const k = Math.min(r.width / W, r.height / H);
@@ -276,7 +280,7 @@ export default function HeroFit() {
       vy = (3.6 * dy) / len - 1.2;
     }
     const clamp = (v: number, m: number) => Math.max(-m, Math.min(m, v));
-    start({ x0: 0.25, y0: 0.95, vx: clamp(Math.max(0.2, vx), 3), vy: clamp(vy, 4.5) }, "drop");
+    start({ x0: 0.25, y0: 0.95, vx: clamp(Math.max(0.2, vx), 3), vy: clamp(vy, 4.5) }, "drop", true);
     setPaused(false);
   };
   const onPointerCancel = () => {
@@ -290,8 +294,9 @@ export default function HeroFit() {
         <canvas
           ref={canvas}
           tabIndex={0}
-          role="img"
-          aria-label="A ball falls or is thrown on a metre grid. Cyan dots are the tracked positions, the violet curve is the fitted fall, and the readout below gives g as it converges."
+          role="group"
+          aria-roledescription="throw simulator"
+          aria-label="Ball throw simulator. Cyan dots are the tracked positions, the violet curve is the fitted fall. Arrow keys aim, Enter throws, Space pauses."
           aria-describedby="hero-keys"
           className="block aspect-[4/3] w-full cursor-crosshair rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 sm:aspect-[2/1]"
           style={{ touchAction: "pan-y" }}
@@ -306,7 +311,7 @@ export default function HeroFit() {
             else if (e.key === "ArrowRight") setAim((a) => ({ ...a, speed: Math.min(4.5, +(a.speed + 0.2).toFixed(1)) }));
             else if (e.key === "ArrowLeft") setAim((a) => ({ ...a, speed: Math.max(1, +(a.speed - 0.2).toFixed(1)) }));
             else if (e.key === "Enter") launchAim();
-            else if (e.key === " ") setPaused((p) => !p);
+            else if (e.key === " " && !reduced) setPaused((p) => !p);
             else return;
             e.preventDefault();
           }}
@@ -318,14 +323,14 @@ export default function HeroFit() {
       </div>
       <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-3">
         <div className="readout text-2xl text-white sm:text-3xl" aria-hidden="true">
-          g = <span className="text-cyan-300">{readout ? readout.g.toFixed(2) : "—"}</span>
+          g = <span className={off != null && Math.abs(off) < 1 ? "text-emerald-300" : "text-cyan-300"}>{readout ? readout.g.toFixed(2) : "—"}</span>
           <span className="text-lg text-slate-400"> ± {readout && Number.isFinite(readout.err) ? readout.err.toFixed(2) : "—"}</span>
           <span className="ml-1 text-sm text-slate-400">m/s²</span>
           {off != null && <span className="ml-2 text-sm text-slate-400">({off > 0 ? "+" : "−"}{Math.abs(off).toFixed(1)}%)</span>}
         </div>
         <Sparkline values={history} />
         <div className="flex gap-2">
-          <button className="btn-ghost" onClick={() => start(DROP, "throw")}>Drop</button>
+          <button className="btn-ghost" onClick={() => start(DROP, "throw", true)}>Drop</button>
           <button className="btn-ghost" onClick={launchAim}>Throw</button>
           {!reduced && (
             <button className="btn-ghost" aria-pressed={paused} onClick={() => setPaused((p) => !p)}>
@@ -334,7 +339,7 @@ export default function HeroFit() {
           )}
         </div>
       </div>
-      <p className="sr-only" aria-live="polite">{announce}</p>
+      <p className="sr-only" role="status">{announce || (readout ? `Last fit: g = ${readout.g.toFixed(2)} metres per second squared from ${readout.n} points.` : "")}</p>
     </div>
   );
 }

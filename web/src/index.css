@@ -3,6 +3,10 @@
 @tailwind utilities;
 
 /* Instrument tokens: cyan is what was measured, violet is the model. Canvas and SVG read the same variables. */
+html {
+  scroll-padding-top: 5rem; /* the sticky header never hides a focused element or an anchor target */
+}
+
 :root {
   --bg: #020617;
   --surface: #0f172a;

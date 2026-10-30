@@ -59,6 +59,15 @@ MAX_NAME = 200  # characters of an uploaded file name kept for History
 logger = logging.getLogger("physicslens.server")
 
 app = FastAPI(title="PhysicsLens")
+
+
+@app.middleware("http")
+async def no_index(request, call_next):
+    """The API serves personal runs and videos: never indexed, whatever reaches it."""
+    response = await call_next(request)
+    if request.url.path.startswith("/api/"):
+        response.headers["X-Robots-Tag"] = "noindex, nofollow"
+    return response
 _busy = threading.Lock()  # one analysis at a time: frames are memory-heavy and the budget is shared
 
 

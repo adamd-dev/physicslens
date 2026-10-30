@@ -17,3 +17,5 @@ samples/commons/
 web/node_modules/
 web/dist/
 .coverage
+web/dist-landing/
+web/dist-landing-ssr/
