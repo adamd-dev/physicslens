@@ -8,10 +8,10 @@ from tests.test_server import client, upload_drop  # noqa: F401  (client is a fi
 
 
 def test_the_ui_is_told_whether_the_site_is_public(client, monkeypatch):  # noqa: F811
-    assert client.get("/api/config").json() == {"public": False, "max_upload_mb": 500}
+    assert client.get("/api/config").json() == {"public": False, "max_upload_mb": 500, "can_delete": True}
     monkeypatch.setattr(server, "PUBLIC", True)
     monkeypatch.setattr(server, "MAX_UPLOAD_BYTES", 100 * 1024 * 1024)
-    assert client.get("/api/config").json() == {"public": True, "max_upload_mb": 100}
+    assert client.get("/api/config").json() == {"public": True, "max_upload_mb": 100, "can_delete": False}
 
 
 def test_only_the_newest_uploads_are_kept(client, tmp_path, monkeypatch):  # noqa: F811

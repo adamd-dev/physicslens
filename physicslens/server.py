@@ -6,6 +6,7 @@ tool calls and results, never the key. Run with `physicslens-ui`.
 
 import csv
 import dataclasses
+import hmac
 import json
 import logging
 import math
@@ -13,6 +14,7 @@ import os
 import queue
 import re
 import threading
+import time
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
@@ -20,7 +22,7 @@ from typing import Annotated, Literal
 
 import cv2
 import numpy as np
-from fastapi import FastAPI, HTTPException, UploadFile
+from fastapi import FastAPI, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
@@ -28,7 +30,7 @@ from pydantic import BaseModel, Field, field_validator
 from .agent.loop import run_agent
 from .agent.tools import Toolbox, total_stderr
 from .calibrate import Calibration
-from .llm.meta_client import PROJECT_ROOT, LLMError, MetaClient
+from .llm.meta_client import PROJECT_ROOT, BudgetExceededError, LLMError, MetaClient
 from .llm.sam_client import SamClient
 from .physics import models
 from .pipeline import (
@@ -56,6 +58,36 @@ PUBLIC = os.environ.get("PHYSICSLENS_PUBLIC") == "1"  # the UI says that videos 
 MAX_UPLOAD_BYTES = int(os.environ.get("PHYSICSLENS_MAX_UPLOAD_MB", "500")) * 1024 * 1024
 MAX_UPLOADS = int(os.environ.get("PHYSICSLENS_MAX_UPLOADS", "0"))  # newest videos kept; 0: all of them
 KEEPALIVE_S = 15.0  # a tunnel or proxy closes a response silent for ~100 s
+# A public site: deleting runs needs this token (unset: nobody deletes), and each visitor gets so many per hour.
+ADMIN_TOKEN = os.environ.get("PHYSICSLENS_ADMIN_TOKEN", "")
+RATE_ANALYZE = int(os.environ.get("PHYSICSLENS_RATE_ANALYZE", "6"))
+RATE_UPLOAD = int(os.environ.get("PHYSICSLENS_RATE_UPLOAD", "12"))
+RATE_WINDOW_S = 3600.0
+_hits: dict[tuple[str, str], list[float]] = {}
+_hits_lock = threading.Lock()
+_cancels: dict[str, threading.Event] = {}  # runs in progress: set to stop one
+
+
+class Cancelled(Exception):
+    """The visitor stopped the run or left; raised at the next event so no further paid step starts."""
+
+
+def _visitor(request: Request) -> str:
+    # Behind the Cloudflare tunnel every request comes from cloudflared; Cloudflare names the real client.
+    return request.headers.get("cf-connecting-ip") or (request.client.host if request.client else "unknown")
+
+
+def _limit(request: Request, kind: str, per_hour: int) -> None:
+    """On a public site, refuse a visitor's request beyond `per_hour` of this kind in the last hour."""
+    if not PUBLIC or per_hour <= 0:
+        return
+    key, now = (_visitor(request), kind), time.monotonic()
+    with _hits_lock:
+        recent = [t for t in _hits.get(key, []) if now - t < RATE_WINDOW_S]
+        if len(recent) >= per_hour:
+            wait = int((RATE_WINDOW_S - (now - recent[0])) / 60) + 1
+            raise HTTPException(429, f"{per_hour} {kind}s per hour from your network on this public demo: try again in {wait} min")
+        _hits[key] = [*recent, now]
 VIDEO_TYPES = {".mp4": "video/mp4", ".m4v": "video/mp4", ".mov": "video/quicktime", ".webm": "video/webm",
                ".avi": "video/x-msvideo", ".mkv": "video/x-matroska"}
 _ID = re.compile(r"[0-9a-f]{32}")
@@ -112,7 +144,8 @@ def _probe(path: Path) -> dict | None:
 
 
 @app.post("/api/videos")
-async def upload_video(file: UploadFile) -> dict:
+async def upload_video(file: UploadFile, request: Request) -> dict:
+    _limit(request, "upload", RATE_UPLOAD)
     ext = Path(file.filename or "").suffix.lower()
     if ext not in VIDEO_TYPES:
         raise HTTPException(415, f"unsupported video type {ext or '(none)'}; use {', '.join(sorted(VIDEO_TYPES))}")
@@ -153,7 +186,7 @@ def _prune_uploads() -> None:
 
 @app.get("/api/config")
 def config() -> dict:
-    return {"public": PUBLIC, "max_upload_mb": MAX_UPLOAD_BYTES // (1024 * 1024)}
+    return {"public": PUBLIC, "max_upload_mb": MAX_UPLOAD_BYTES // (1024 * 1024), "can_delete": not PUBLIC}
 
 
 @app.get("/api/videos/{video_id}/info")
@@ -369,18 +402,23 @@ def _analyze(req: AnalyzeRequest, emit) -> None:
     if req.agent and (why := wrong_object(data, calibration.rel_err)):
         emit("error", {"stage": "no measurement", "message": why, "steps": 0})
         return
+    outcome = None
     if req.agent:
         emit("status", {"stage": "agent"})
         question = agent_question(req.height_m, rest_notes)
         try:
             outcome = run_agent(make_client(), box, question,
                                 on_message=lambda m: emit("agent_message", dataclasses.asdict(m)))
+        except BudgetExceededError as exc:
+            # The demo never breaks on the budget: the deterministic fit and checks still give a number.
+            emit("note", {"message": f"The Muse agent was skipped: the API budget is used up ({exc}). Fitted without the agent."})
         except (LLMError, OSError, ValueError) as exc:
             emit("error", {"stage": "agent", "message": str(exc)})
             return
         finally:
             if cost := _cost_event(before):
                 emit("cost", cost)
+    if outcome is not None:
         if outcome.fit_id is None or outcome.check is None or outcome.fit_id not in box.fits:
             stage = "no measurement" if outcome.no_measurement else "agent"
             emit("error", {"stage": stage, "message": outcome.summary, "steps": outcome.steps})
@@ -501,23 +539,39 @@ def get_run(run_id: str) -> dict:
 
 
 @app.delete("/api/runs/{run_id}", status_code=204)
-def delete_run(run_id: str) -> Response:
+def delete_run(run_id: str, request: Request) -> Response:
+    # A public History is shared: only whoever runs the site (with the admin token) removes runs from it.
+    if PUBLIC and not (ADMIN_TOKEN and hmac.compare_digest(request.headers.get("x-admin-token", ""), ADMIN_TOKEN)):
+        raise HTTPException(403, "runs on this public demo can only be deleted by its owner")
     path = _run_path(run_id)
     (RUNS / f"{run_id}.sum.json").unlink(missing_ok=True)
     path.unlink(missing_ok=True)  # the video stays: other runs may use it; a second delete is a 404 above
     return Response(status_code=204)
 
 
+@app.post("/api/runs/{run_id}/cancel", status_code=202)
+def cancel_run(run_id: str) -> Response:
+    """Stop a run in progress (the Stop button); the slot frees as soon as the current step ends."""
+    if not _ID.fullmatch(run_id) or run_id not in _cancels:
+        raise HTTPException(404, "no such run in progress")
+    _cancels[run_id].set()
+    return Response(status_code=202)
+
+
 @app.post("/api/analyze")
-def analyze(req: AnalyzeRequest) -> StreamingResponse:
+def analyze(req: AnalyzeRequest, request: Request) -> StreamingResponse:
     _video_path(req.video_id)  # 404 before the stream starts
+    _limit(request, "analysis", RATE_ANALYZE)
     if not _busy.acquire(blocking=False):
         raise HTTPException(409, "an analysis is already running")
     events: queue.Queue[str | None] = queue.Queue()
     run_id = uuid.uuid4().hex
     recorded: list[dict] = []
+    cancel = _cancels[run_id] = threading.Event()
 
     def emit(name: str, data) -> None:
+        if cancel.is_set():
+            raise Cancelled
         clean = _clean(data)
         recorded.append({"event": name, "data": clean})
         events.put(_event(name, clean))
@@ -526,6 +580,10 @@ def analyze(req: AnalyzeRequest) -> StreamingResponse:
         try:
             emit("run", {"id": run_id})
             _analyze(req, emit)
+        except Cancelled:
+            stopped = {"stage": "cancelled", "message": "stopped before it finished"}
+            recorded.append({"event": "error", "data": stopped})
+            events.put(_event("error", stopped))
         except Exception as exc:  # noqa: BLE001 - the stream must end with an error event, never hang the UI
             emit("error", {"stage": "internal", "message": f"{type(exc).__name__}: {exc}"})
         finally:
@@ -538,20 +596,24 @@ def analyze(req: AnalyzeRequest) -> StreamingResponse:
             finally:
                 events.put(_event("done", {}))
                 events.put(None)
+                _cancels.pop(run_id, None)
                 _busy.release()
 
     threading.Thread(target=work, daemon=True).start()
 
     def stream():
-        while True:
-            try:
-                item = events.get(timeout=KEEPALIVE_S)
-            except queue.Empty:
-                yield ": keepalive\n\n"  # an SSE comment: proxies see traffic during a long silent step
-                continue
-            if item is None:
-                return
-            yield item
+        try:
+            while True:
+                try:
+                    item = events.get(timeout=KEEPALIVE_S)
+                except queue.Empty:
+                    yield ": keepalive\n\n"  # an SSE comment: proxies see traffic during a long silent step
+                    continue
+                if item is None:
+                    return
+                yield item
+        finally:
+            cancel.set()  # the visitor left (or the run ended): nothing more is paid for an empty room
 
     return StreamingResponse(stream(), media_type="text/event-stream", headers={"Cache-Control": "no-cache"})
 
