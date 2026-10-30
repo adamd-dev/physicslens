@@ -25,6 +25,7 @@ LINK_PX = 8.0  # how far a blob may be from a path's prediction, plus a share of
 LINK_SHARE = 0.5
 MAX_BLOBS = 20  # largest blobs per sample: bounds the linking cost on a busy clip
 BOX_PAD_PX = 2
+WHOLE_SHARE = 0.8  # of the path's median box area: smaller first blobs are crescents, not the whole ball
 MIN_EXTENT_BOXES = 3  # a path must travel at least this many ball sizes to be worth fitting
 MAX_PATHS_FITTED = 10  # farthest first: bounds the fitting time on a busy clip
 MAX_SWING_FITS = 3  # paths that get the slow pendulum fits when no fall or throw fits them
@@ -141,6 +142,17 @@ def _size(p: _Path) -> float:
     return float(np.median([b[2] - b[0] + 1 for b in p.boxes]))
 
 
+def _first_whole(p: _Path) -> int:
+    """Index of the first sample whose blob is the ball's full size.
+
+    Where a ball was held still is masked as flicker, so just after release only a crescent of it
+    moves: a box around that crescent misses the ball's centre.
+    """
+    areas = [(b[2] - b[0] + 1) * (b[3] - b[1] + 1) for b in p.boxes]
+    full = WHOLE_SHARE * float(np.median(areas))
+    return next((i for i, a in enumerate(areas) if a >= full), 0)
+
+
 def _score(p: _Path, px_per_m: float, swing: bool) -> tuple[str, float] | None:
     """(model, R²) of the best physically possible fit of the path, or None if no real object moves so.
 
@@ -175,10 +187,11 @@ def _detect(video: Video, moving: np.ndarray, fields: str | None, px_per_m: floa
             continue
         model, r2 = scored
         h, w = video.frames[0].shape[:2]
-        x0, y0, x1, y1 = p.boxes[0]
+        i = _first_whole(p)
+        x0, y0, x1, y1 = p.boxes[i]
         box = (max(0, x0 - BOX_PAD_PX), max(0, y0 - BOX_PAD_PX), min(w - 1, x1 + BOX_PAD_PX), min(h - 1, y1 + BOX_PAD_PX))
         source = "motion" if fields is None else f"motion-{fields}"
-        return Detection(box, p.frames[0], Track(np.array(p.t), np.array(p.x), np.array(p.y), source=source), fields or "none", model, r2)
+        return Detection(box, p.frames[i], Track(np.array(p.t), np.array(p.x), np.array(p.y), source=source), fields or "none", model, r2)
     return None
 
 
