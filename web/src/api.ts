@@ -221,3 +221,14 @@ export async function videoInfo(videoId: string, signal?: AbortSignal): Promise<
   const response = await fetch(`/api/videos/${encodeURIComponent(videoId)}/info`, { signal });
   return response.ok ? response.json() : null;
 }
+
+export interface SiteConfig {
+  public: boolean; // a shared public site: uploads and runs are visible to everyone
+  max_upload_mb: number;
+}
+
+export async function getConfig(): Promise<SiteConfig> {
+  const response = await fetch("/api/config");
+  if (!response.ok) throw await failure(response);
+  return response.json();
+}

@@ -19,10 +19,11 @@ function Section({ id, label, title, children }: { id: string; label: string; ti
   );
 }
 
-/** Home: what PhysicsLens does, shown with the physics itself. `local` adds the parts that need the local server. */
-export default function HomePage({ local = true }: { local?: boolean }) {
+/** Home: what PhysicsLens does, shown with the physics itself. `local` adds the parts that need the app's server;
+ *  `appUrl` (public page) is where the online app lives. */
+export default function HomePage({ local = true, appUrl }: { local?: boolean; appUrl?: string }) {
   const heading = useFocusHeading(local); // a page opened from a link keeps the browser's own focus
-  const appLink = (path: string) => (local ? href(path) : "#get-the-code");
+  const appLink = (path: string) => (local ? href(path) : appUrl ? `${appUrl}/${href(path)}` : "#get-the-code");
   return (
     <div>
       <section className="grid items-center gap-8 pb-12 pt-4 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] lg:py-16">
@@ -37,9 +38,9 @@ export default function HomePage({ local = true }: { local?: boolean }) {
           </p>
           <div className="mt-6 flex flex-wrap gap-3">
             <a href={appLink("/analyze")} className="btn min-h-11 bg-gradient-to-r from-cyan-400 to-violet-500 px-5 text-base font-semibold text-slate-950 hover:brightness-110">
-              {local ? "Analyze a video" : "Get the code"}
+              {local || appUrl ? "Analyze a video" : "Get the code"}
             </a>
-            {local && <a href={href("/history")} className="btn-ghost min-h-11 px-5 text-base">See past runs</a>}
+            {(local || appUrl) && <a href={appLink("/history")} className="btn-ghost min-h-11 px-5 text-base">See past runs</a>}
           </div>
         </div>
         <HeroFit />

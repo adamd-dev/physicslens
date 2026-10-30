@@ -51,7 +51,10 @@ UPLOADS = PROJECT_ROOT / "cache" / "uploads"
 WEB_DIST = PROJECT_ROOT / "web" / "dist"
 COSTS = PROJECT_ROOT / "costs.csv"
 RUNS = PROJECT_ROOT / "cache" / "runs"  # one JSON file per analysis: the History page
-MAX_UPLOAD_BYTES = 500 * 1024 * 1024
+# Running as a public site (a Hugging Face Space) sets these; locally nothing changes.
+PUBLIC = os.environ.get("PHYSICSLENS_PUBLIC") == "1"  # the UI says that videos and runs are visible to everyone
+MAX_UPLOAD_BYTES = int(os.environ.get("PHYSICSLENS_MAX_UPLOAD_MB", "500")) * 1024 * 1024
+MAX_UPLOADS = int(os.environ.get("PHYSICSLENS_MAX_UPLOADS", "0"))  # newest videos kept; 0: all of them
 VIDEO_TYPES = {".mp4": "video/mp4", ".m4v": "video/mp4", ".mov": "video/quicktime", ".webm": "video/webm",
                ".avi": "video/x-msvideo", ".mkv": "video/x-matroska"}
 _ID = re.compile(r"[0-9a-f]{32}")
@@ -133,7 +136,23 @@ async def upload_video(file: UploadFile) -> dict:
         (UPLOADS / f"{video_id}.json").write_text(json.dumps({"name": name}), encoding="utf-8")
     except OSError:
         logger.warning("video %s: name not saved", video_id)
+    _prune_uploads()
     return {"video_id": video_id, "name": name, **info}
+
+
+def _prune_uploads() -> None:
+    """Keep the newest MAX_UPLOADS videos so a public disk never fills; runs of a removed video show it as gone."""
+    if MAX_UPLOADS <= 0:
+        return
+    videos = sorted((p for p in UPLOADS.iterdir() if p.suffix in VIDEO_TYPES and _ID.fullmatch(p.stem)), key=lambda p: p.stat().st_mtime)
+    for old in videos[: max(0, len(videos) - MAX_UPLOADS)]:
+        old.unlink(missing_ok=True)
+        (UPLOADS / f"{old.stem}.json").unlink(missing_ok=True)
+
+
+@app.get("/api/config")
+def config() -> dict:
+    return {"public": PUBLIC, "max_upload_mb": MAX_UPLOAD_BYTES // (1024 * 1024)}
 
 
 @app.get("/api/videos/{video_id}/info")
@@ -536,4 +555,5 @@ if WEB_DIST.is_dir():
 def main() -> None:
     import uvicorn
 
-    uvicorn.run(app, host="127.0.0.1", port=int(os.environ.get("PHYSICSLENS_PORT", "8000")))
+    # 127.0.0.1 unless told otherwise: only a container (the public Space) listens on every interface.
+    uvicorn.run(app, host=os.environ.get("PHYSICSLENS_HOST", "127.0.0.1"), port=int(os.environ.get("PHYSICSLENS_PORT", "8000")))

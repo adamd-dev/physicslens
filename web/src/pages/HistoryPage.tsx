@@ -16,7 +16,7 @@ const SORTS = { new: "Newest", old: "Oldest", dev: "Closest to 9.81", cost: "Cos
 type Sort = keyof typeof SORTS;
 
 /** Every saved analysis. Filters live in the URL, so a filtered view survives a reload. */
-export default function HistoryPage({ query, onChange }: { query: URLSearchParams; onChange?: () => void }) {
+export default function HistoryPage({ query, shared = false, onChange }: { query: URLSearchParams; shared?: boolean; onChange?: () => void }) {
   const [runs, setRuns] = useState<RunSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null); // announced after a delete, or why it failed
@@ -88,7 +88,7 @@ export default function HistoryPage({ query, onChange }: { query: URLSearchParam
         <div>
           <h1 ref={heading} tabIndex={-1} className="text-2xl font-semibold tracking-tight focus:outline-none">History</h1>
           <p className="text-sm text-slate-400">
-            {runs ? `${runs.length} saved ${runs.length === 1 ? "run" : "runs"}` : "Saved runs"} · stored on this machine only
+            {runs ? `${runs.length} saved ${runs.length === 1 ? "run" : "runs"}` : "Saved runs"} · {shared ? "shared by everyone who uses this site" : "stored on this machine only"}
           </p>
         </div>
         <a href={href("/analyze")} className="btn bg-gradient-to-r from-cyan-400 to-violet-500 font-semibold text-slate-950 hover:brightness-110">

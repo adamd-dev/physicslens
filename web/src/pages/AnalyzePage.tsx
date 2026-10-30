@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
-import type { Point, Settings, VideoInfo } from "../api";
+import type { Point, Settings, SiteConfig, VideoInfo } from "../api";
 import { analyze, uploadVideo } from "../api";
 import AgentTimeline from "../components/AgentTimeline";
 import ResultCard from "../components/ResultCard";
@@ -29,7 +29,7 @@ export const TRACKERS: Record<string, string> = { motion: "motion", color: "colo
 const STAGES: Record<string, string> = { loading: "Loading frames", tracking: "Tracking the ball", fitting: "Fitting models", agent: "Muse is reasoning" };
 
 /** The analysis workbench. Stays mounted while the user visits other pages, so a run in progress goes on. */
-export default function AnalyzePage({ active = true, onRunning }: { active?: boolean; onRunning?: (running: boolean) => void }) {
+export default function AnalyzePage({ active = true, site, onRunning }: { active?: boolean; site?: SiteConfig; onRunning?: (running: boolean) => void }) {
   const heading = useFocusHeading(active);
   const [info, setInfo] = useState<VideoInfo | null>(null);
   const [uploading, setUploading] = useState(false);
@@ -113,7 +113,7 @@ export default function AnalyzePage({ active = true, onRunning }: { active?: boo
 
       <div>
       {!info ? (
-        <Upload onFile={onFile} uploading={uploading} error={error} />
+        <Upload onFile={onFile} uploading={uploading} error={error} site={site} />
       ) : (
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_360px] xl:grid-cols-[minmax(0,1fr)_400px]">
           <section aria-label="Video and charts" className="space-y-4">
@@ -244,7 +244,7 @@ function Checklist({ calibrated, roi, ballBox }: { calibrated: boolean; roi: boo
   );
 }
 
-function Upload({ onFile, uploading, error }: { onFile: (f: File) => void; uploading: boolean; error: string | null }) {
+function Upload({ onFile, uploading, error, site }: { onFile: (f: File) => void; uploading: boolean; error: string | null; site?: SiteConfig }) {
   const [over, setOver] = useState(false);
   return (
     <label
@@ -265,7 +265,13 @@ function Upload({ onFile, uploading, error }: { onFile: (f: File) => void; uploa
       <div className="text-lg font-semibold">{uploading ? "Uploading…" : "Drop a video of your experiment"}</div>
       <div id="upload-help" className="max-w-md text-center text-sm text-slate-400">
         A dropped ball, a throw, or a pendulum. Keep the phone still and put a ruler or a sheet of A4 in the plane of motion.
+        {site && ` Up to ${site.max_upload_mb} MB.`}
       </div>
+      {site?.public && (
+        <p className="max-w-md rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-center text-sm text-amber-200">
+          This is a public demo: your video, its file name and the result are visible to everyone who opens History. Upload only clips you are happy to share.
+        </p>
+      )}
       {error && <div className="text-sm text-rose-300">{error}</div>}
       <input type="file" accept="video/*" className="sr-only" onChange={(e) => e.target.files?.[0] && onFile(e.target.files[0])} />
     </label>

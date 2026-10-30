@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useState } from "react";
-import { listRuns } from "./api";
+import { getConfig, listRuns, type SiteConfig } from "./api";
 import AppHeader from "./components/AppHeader";
 import AnalyzePage from "./pages/AnalyzePage";
 import { useRoute } from "./router";
@@ -14,6 +14,10 @@ export default function App() {
   const route = useRoute();
   const [running, setRunning] = useState(false);
   const [runCount, setRunCount] = useState<number | null>(null);
+  const [site, setSite] = useState<SiteConfig>({ public: false, max_upload_mb: 500 });
+  useEffect(() => {
+    getConfig().then(setSite).catch(() => {});
+  }, []);
   // Analyze mounts on first visit and then stays: an analysis in progress and the loaded video survive tab switches.
   const [analyzeMounted, setAnalyzeMounted] = useState(route.page === "analyze");
 
@@ -45,12 +49,12 @@ export default function App() {
       <main id="main" tabIndex={-1} className="focus:outline-none">
         {analyzeMounted && (
           <div hidden={route.page !== "analyze"}>
-            <AnalyzePage active={route.page === "analyze"} onRunning={onRunning} />
+            <AnalyzePage active={route.page === "analyze"} site={site} onRunning={onRunning} />
           </div>
         )}
         <Suspense fallback={<div className="panel h-64 animate-pulse" aria-busy="true" />}>
           {route.page === "home" && <HomePage />}
-          {route.page === "history" && <HistoryPage query={route.query} onChange={refreshCount} />}
+          {route.page === "history" && <HistoryPage query={route.query} shared={site.public} onChange={refreshCount} />}
           {route.page === "run" && <RunDetailPage id={route.id} onDeleted={refreshCount} />}
         </Suspense>
       </main>

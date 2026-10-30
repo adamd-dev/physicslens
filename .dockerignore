@@ -1,0 +1,16 @@
+.git
+.venv
+.env
+.env.*
+cache
+runs
+samples
+graphify-out
+costs.csv
+tests
+__pycache__
+*.egg-info
+web/node_modules
+web/dist
+web/dist-landing
+web/dist-landing-ssr
