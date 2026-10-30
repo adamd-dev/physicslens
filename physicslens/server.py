@@ -556,4 +556,4 @@ def main() -> None:
     import uvicorn
 
     # 127.0.0.1 unless told otherwise: only a container (the public Space) listens on every interface.
-    uvicorn.run(app, host=os.environ.get("PHYSICSLENS_HOST", "127.0.0.1"), port=int(os.environ.get("PHYSICSLENS_PORT", "8000")))
+    uvicorn.run(app, host=os.environ.get("PHYSICSLENS_HOST", "127.0.0.1"), port=int(os.environ.get("PHYSICSLENS_PORT") or os.environ.get("PORT") or "8000"))

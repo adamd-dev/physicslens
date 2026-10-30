@@ -1,0 +1,27 @@
+# Render Blueprint: PhysicsLens online on the free plan (512 MB RAM, 0.1 CPU, no persistent disk).
+# Windows are shorter and frames smaller than on a laptop so a long clip never runs the instance out of memory.
+# History and uploads live on the instance's disk: they are cleared when the service restarts or redeploys.
+services:
+  - type: web
+    name: physicslens
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /api/config
+    autoDeploy: true
+    envVars:
+      - key: PORT
+        value: "7860"
+      - key: PHYSICSLENS_MAX_FRAMES
+        value: "240"
+      - key: PHYSICSLENS_MAX_WIDTH
+        value: "480"
+      - key: PHYSICSLENS_MAX_UPLOAD_MB
+        value: "50"
+      - key: PHYSICSLENS_MAX_UPLOADS
+        value: "10"
+      # Entered by you in the Render dashboard when the Blueprint is created; never committed.
+      - key: MODEL_API_KEY
+        sync: false
+      - key: PHYSICSLENS_MAX_USD
+        sync: false

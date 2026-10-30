@@ -46,3 +46,36 @@ def test_settings_come_from_the_environment(monkeypatch):
         for name in ("PHYSICSLENS_PUBLIC", "PHYSICSLENS_MAX_UPLOAD_MB", "PHYSICSLENS_MAX_UPLOADS"):
             os.environ.pop(name, None)
         importlib.reload(server)
+
+
+def test_frame_and_width_limits_come_from_the_environment(monkeypatch):
+    # A small host (512 MB) runs with shorter windows and smaller frames; nothing changes when unset.
+    import importlib
+
+    from physicslens import pipeline
+
+    monkeypatch.setenv("PHYSICSLENS_MAX_FRAMES", "240")
+    monkeypatch.setenv("PHYSICSLENS_MAX_WIDTH", "480")
+    try:
+        reloaded = importlib.reload(pipeline)
+        assert reloaded.MAX_FRAMES == 240 and reloaded.MAX_WIDTH == 480
+    finally:
+        monkeypatch.delenv("PHYSICSLENS_MAX_FRAMES")
+        monkeypatch.delenv("PHYSICSLENS_MAX_WIDTH")
+        reloaded = importlib.reload(pipeline)
+    assert reloaded.MAX_FRAMES == 1200 and reloaded.MAX_WIDTH == 960
+
+
+def test_the_port_can_come_from_the_host(monkeypatch):
+    # Render and Cloud Run tell the app its port in PORT; PHYSICSLENS_PORT still wins.
+    calls = {}
+    import uvicorn
+
+    monkeypatch.setattr(uvicorn, "run", lambda app, host, port: calls.update(host=host, port=port))
+    monkeypatch.delenv("PHYSICSLENS_PORT", raising=False)
+    monkeypatch.setenv("PORT", "10000")
+    server.main()
+    assert calls == {"host": "127.0.0.1", "port": 10000}
+    monkeypatch.setenv("PHYSICSLENS_PORT", "7860")
+    server.main()
+    assert calls["port"] == 7860

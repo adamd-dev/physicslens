@@ -1,5 +1,6 @@
 """Video in, track and fits out: the steps shared by the CLI and the web API."""
 
+import os
 import warnings
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
@@ -22,9 +23,9 @@ MIN_VX = 0.1  # m/s; slower horizontal drift is camera tilt or tracking noise, n
 MOTION_MAX_AREA = 2000
 # Frames a window may hold: 5 s at 240 fps. At 960x540 that is ~1.9 GB of frames plus ~1.6 GB while the
 # masks are made; longer windows need a start and end (SAM takes at most MAX_SAM_FRAMES).
-MAX_FRAMES = 1200
+MAX_FRAMES = int(os.environ.get("PHYSICSLENS_MAX_FRAMES", "1200"))  # a small host (512 MB) sets fewer
 # Frames are shrunk to this width on load, in the CLI and the UI: a 1080p60 clip is ~6 MB per frame otherwise.
-MAX_WIDTH = 960
+MAX_WIDTH = int(os.environ.get("PHYSICSLENS_MAX_WIDTH", "960"))
 # A still ball (in the hand before release, on the floor after landing) stays within the rest radius
 # for at least MIN_REST_S. The radius never drops below REST_RADIUS_PX: tracking jitter is 1-2 px, and
 # interlaced fields move a still ball half a line. Shorter still runs are the slow first frames of motion.
