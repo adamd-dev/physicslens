@@ -7,6 +7,9 @@ from scipy.optimize import curve_fit
 
 from . import models
 
+# Real swings converge in under 40 evaluations per start; a path that is not a swing (a straight
+# line) sends the amplitude to infinity and used up 20000 per start: about a minute per failed fit.
+OSCILLATION_MAXFEV = 2000
 
 @dataclass
 class FitResult:
@@ -25,8 +28,8 @@ def _r2(y, y_hat) -> float:
     return 1.0 - ss_res / ss_tot if ss_tot > 0 else float("nan")
 
 
-def _fit(func, names, t, y, p0, bounds=(-np.inf, np.inf)):
-    popt, pcov = curve_fit(func, t, y, p0=p0, bounds=bounds, maxfev=20000)
+def _fit(func, names, t, y, p0, bounds=(-np.inf, np.inf), maxfev=20000):
+    popt, pcov = curve_fit(func, t, y, p0=p0, bounds=bounds, maxfev=maxfev)
     stderr = np.sqrt(np.clip(np.diag(pcov), 0, None))
     residuals = y - func(t, *popt)
     return (
@@ -93,7 +96,8 @@ def fit_damped_oscillation(t, s) -> FitResult:
     for phase in (0.0, np.pi / 2, np.pi, 3 * np.pi / 2):
         try:
             params, stderr, res = _fit(
-                models.damped_oscillation, names, t, s, p0=[amplitude, 0.0, omega, phase, offset], bounds=bounds
+                models.damped_oscillation, names, t, s, p0=[amplitude, 0.0, omega, phase, offset], bounds=bounds,
+                maxfev=OSCILLATION_MAXFEV,
             )
         except (RuntimeError, ValueError):
             continue

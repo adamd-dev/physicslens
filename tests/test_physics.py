@@ -61,3 +61,16 @@ def test_landing_distance_with_downward_launch_is_shorter():
     flat = models.landing_distance(vx=1.0, height=0.8)
     angled = models.landing_distance(vx=1.0, height=0.8, vy=0.5)
     assert angled < flat
+
+
+def test_an_oscillation_fit_gives_up_quickly_on_a_straight_line():
+    # Each failed start used to run 20000 evaluations: about a minute for a path that is no swing.
+    import time
+
+    from physicslens.physics.fit import fit_damped_oscillation
+
+    t = np.arange(40) / 60
+    start = time.perf_counter()
+    with pytest.raises(RuntimeError):
+        fit_damped_oscillation(t, 0.05 + 0.7 * t)
+    assert time.perf_counter() - start < 20
