@@ -19,7 +19,7 @@ export const G_BENCH: Bench[] = [
 ];
 
 export const L_BENCH: Bench[] = [
-  { label: "Commons pendulum · SAM 3.1 + fit", value: 0.59, err: 0.002, points: 105, detail: "R² 0.994 · flagged: structured residuals" },
+  { label: "Commons pendulum · SAM 3.1 + fit", value: 0.5904, err: null, points: 105, detail: "R² 0.994 · flagged: structured residuals" },
 ];
 export const L_TAPE = 0.6;
 

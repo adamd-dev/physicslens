@@ -1,8 +1,7 @@
 """Model-agnostic LLM interface.
 
-Runtime model calls must go to Meta models (Muse Spark via Meta Model API, or
-Muse Spark Open via Modal/Baseten). MockClient lets the agent loop be built
-and tested without spending credits.
+Runtime model calls must go to Meta models (Muse Spark via the Meta Model API).
+MockClient lets the agent loop be built and tested without spending credits.
 """
 
 from dataclasses import dataclass, field

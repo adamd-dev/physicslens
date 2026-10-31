@@ -6,7 +6,7 @@ export const FAQ: { q: string; a: string }[] = [
   },
   {
     q: "How accurate is it?",
-    a: "On the BallDrop sample video it measured g = 9.728 m/s², 0.8% below 9.81. On a Wikimedia Commons video of a 0.60 m pendulum it measured L = 0.590 m, 1.7% short. These are two clips, not a benchmark; the depth difference between the ball and the ruler is the main remaining error.",
+    a: "On the BallDrop sample video it measured g = 9.728 m/s², 0.8% below 9.81. On a Wikimedia Commons video of a 0.60 m pendulum it measured L = 0.590 m, 1.6% short. These are two clips, not a benchmark; the depth difference between the ball and the ruler is the main remaining error.",
   },
   {
     q: "What do I need to film an experiment?",

@@ -6,7 +6,7 @@ physics with SciPy, and a Meta Muse Spark agent checks the fit before you see a 
 - **Landing page:** https://physicslens-lab.vercel.app
 - **Live app:** https://physicslens-lab.vercel.app/app (runs from the author's machine during the judging period; see
   [Run it as a public site](#run-it-as-a-public-site)). If it does not answer, the machine is offline: the demo video
-  shows the full flow, and [Run it on your computer](#run-it-on-your-computer) takes four commands.
+  shows the full flow, and [Run it on your computer](#run-it-on-your-computer) takes five commands.
 
 Built for the Meta Global AI Developer Hackathon (Oct 26 – Nov 4, 2026). All code here was written during the hackathon.
 
@@ -42,7 +42,7 @@ Two clips, not a benchmark. ± is the fit (and the scale reading where stated); 
 |---|---|---|---|---|
 | BallDrop (OSP Tracker sample) · motion tracker | g | 9.728 m/s² | 9.81 m/s² | −0.8% |
 | BallDrop · SAM 3.1 box | g | 9.653 m/s² | 9.81 m/s² | −1.6% |
-| Wikimedia Commons pendulum · SAM 3.1 + fit (flagged) | length L | 0.590 m | 0.60 m (tape) | −1.7% |
+| Wikimedia Commons pendulum · SAM 3.1 + fit (flagged, so no ± is given) | length L | 0.590 m | 0.60 m (tape) | −1.6% |
 
 The main remaining error on BallDrop is depth: the ball falls in front of the ruler's plane.
 
