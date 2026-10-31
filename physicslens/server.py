@@ -73,8 +73,9 @@ class Cancelled(Exception):
 
 
 def _visitor(request: Request) -> str:
-    # Behind the Cloudflare tunnel every request comes from cloudflared on this machine and Cloudflare names the
-    # real client; anyone else could write that header, so it is trusted only from loopback.
+    # Behind the Cloudflare tunnel uvicorn already gives the real client (it trusts X-Forwarded-For from loopback).
+    # If a request still shows loopback, Cloudflare's CF-Connecting-IP names the client; anyone else could write
+    # that header, so it is trusted only from loopback.
     host = request.client.host if request.client else "unknown"
     if host in ("127.0.0.1", "::1", "testclient"):
         return request.headers.get("cf-connecting-ip") or host

@@ -178,7 +178,8 @@ def test_from_env_requires_key(tmp_path):
 def test_from_env_reads_dotenv_and_overrides(tmp_path):
     dotenv = tmp_path / ".env"
     dotenv.write_text(f"# comment\nMODEL_API_KEY='{KEY}'\nPHYSICSLENS_MODEL=muse-spark-1.2\n")
-    c = MetaClient.from_env(env={"PHYSICSLENS_BASE_URL": "https://inference.baseten.co/v1/"}, dotenv_path=dotenv)
+    env = {"PHYSICSLENS_BASE_URL": "https://models.example.org/v1/", "PHYSICSLENS_ALLOW_HOST": "models.example.org"}
+    c = MetaClient.from_env(env=env, dotenv_path=dotenv)
     assert c.model == "muse-spark-1.2"
-    assert c.base_url == "https://inference.baseten.co/v1"
+    assert c.base_url == "https://models.example.org/v1"
     assert KEY not in repr(c)

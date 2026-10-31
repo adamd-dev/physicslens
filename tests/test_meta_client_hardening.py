@@ -39,7 +39,7 @@ def test_localhost_http_and_explicit_extra_host_are_allowed():
 
 def test_dotenv_cannot_redirect_the_key(tmp_path):
     dotenv = tmp_path / ".env"
-    dotenv.write_text(f"MODEL_API_KEY={KEY}\nPHYSICSLENS_BASE_URL=https://inference.baseten.co/v1\n")
+    dotenv.write_text(f"MODEL_API_KEY={KEY}\nPHYSICSLENS_BASE_URL=https://models.example.org/v1\n")
     assert MetaClient.from_env(env={}, dotenv_path=dotenv).base_url == "https://api.meta.ai/v1"
 
 
@@ -178,3 +178,12 @@ def test_a_fresh_clone_has_a_spend_cap():
 def test_an_explicit_budget_still_wins():
     c = MetaClient.from_env(env={"MODEL_API_KEY": KEY, "PHYSICSLENS_MAX_USD": "12"}, dotenv_path="/nonexistent")
     assert c.max_usd == 12.0
+
+
+def test_only_meta_is_allowed_by_default():
+    # Meta models only at runtime: another host needs an explicit PHYSICSLENS_ALLOW_HOST.
+    from physicslens.llm.meta_client import ALLOWED_HOSTS
+
+    assert ALLOWED_HOSTS == {"api.meta.ai"}
+    with pytest.raises(LLMConfigError):
+        MetaClient(KEY, base_url="https://inference.baseten.co/v1")

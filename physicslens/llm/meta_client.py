@@ -28,7 +28,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_BASE_URL = "https://api.meta.ai/v1"
 DEFAULT_MODEL = "muse-spark-1.3"
 # Hosts the key may be sent to. Others need an explicit allowed_hosts / PHYSICSLENS_ALLOW_HOST.
-ALLOWED_HOSTS = frozenset({"api.meta.ai", "inference.baseten.co"})
+ALLOWED_HOSTS = frozenset({"api.meta.ai"})
 LOCAL_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
 # USD per 1M (input, output) tokens, matched by model-id prefix (dev.meta.ai pricing, 2026-10).
 PRICES = {"muse-spark-contributor": (0.10, 0.20), "muse-spark": (1.25, 4.25)}
