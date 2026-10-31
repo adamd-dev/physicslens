@@ -16,6 +16,18 @@ import numpy as np
 
 # Container clock may disagree with the declared fps by this much before we distrust it.
 MAX_CLOCK_MISMATCH = 0.2
+# An edited clip slowed by showing each frame several times: most consecutive frames are exact copies.
+REPEAT_SHARE = 0.5  # share of copies above which the clip is treated as slowed by repetition
+CHANGED_PX = 4  # pixels (at quarter size) that must change for a frame to be new, so a small moving ball counts
+
+
+def _new_frames(frames: list[np.ndarray]) -> list[int] | None:
+    """Indices of the frames that are not copies of the frame before, when most frames are copies; else None."""
+    small = [cv2.cvtColor(cv2.resize(f, None, fx=0.25, fy=0.25, interpolation=cv2.INTER_AREA), cv2.COLOR_BGR2GRAY).astype(np.int16)
+             for f in frames]
+    new = [0] + [i for i in range(1, len(small)) if int((np.abs(small[i] - small[i - 1]) > 25).sum()) >= CHANGED_PX]
+    repeats = len(frames) - len(new)
+    return new if len(frames) > 2 and repeats >= REPEAT_SHARE * (len(frames) - 1) else None
 
 
 @dataclass
@@ -94,6 +106,14 @@ def load_video(
         raise ValueError(f"no frames in window [{start_s}, {end_s}) of {path}")
 
     expected_dt = time_scale / playback_fps
+    if (new := _new_frames(frames)) is not None:
+        # Copies add no motion and stall the motion tracker: keep each real frame once, at its own time.
+        step = float(np.median(np.diff(new))) if len(new) > 1 else 1.0
+        frames = [frames[i] for i in new]
+        container_ts = [container_ts[i] for i in new]
+        index_ts = [index_ts[i] for i in new]
+        expected_dt *= step
+        warnings.warn(f"each frame was repeated about {step:g} times (a slowed edit): kept the {len(frames)} real frames")
     timestamps, source = np.asarray(index_ts), "index"
     if len(frames) > 1:
         repaired = _repair(np.asarray(container_ts))
