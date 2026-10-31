@@ -60,3 +60,15 @@ def test_a_still_clip_is_not_mistaken_for_a_slowed_one(tmp_path):
         writer.write(np.zeros((480, 640, 3), np.uint8))
     writer.release()
     assert len(load_video(str(path)).frames) == 9
+
+
+def test_a_slow_real_time_swing_is_not_mistaken_for_a_slowed_edit(tmp_path):
+    # A big bob creeping a pixel per frame changes few pixels: frames look alike but none is a copy.
+    path = tmp_path / "creep.avi"
+    writer = cv2.VideoWriter(str(path), cv2.VideoWriter_fourcc(*"MJPG"), 25, (640, 480))
+    for i in range(50):
+        frame = np.full((480, 640, 3), 120, np.uint8)
+        cv2.circle(frame, (300 + (i % 2), 240), 60, (30, 30, 30), -1)  # moves one pixel back and forth
+        writer.write(frame)
+    writer.release()
+    assert len(load_video(str(path)).frames) == 50
