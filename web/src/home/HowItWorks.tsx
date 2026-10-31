@@ -33,7 +33,7 @@ export default function HowItWorks() {
           ))}
         </ol>
         <p className="mt-4 text-sm text-slate-400">
-          Muse tried four models, rejected three, and kept the swing fit with its flag stated instead of hiding it. The length it reports comes from that fit, not from the model's text.
+          In this run (Oct 28) Muse tried four models, rejected three, and kept the swing fit with its flag stated. With today's stricter rules it declines to certify the same fit and says why: the residuals are not random. Either way the length comes from the fit, not from the model's text.
         </p>
       </figure>
     </div>
