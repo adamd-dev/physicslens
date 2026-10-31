@@ -19,3 +19,4 @@ web/dist/
 .coverage
 web/dist-landing/
 web/dist-landing-ssr/
+.claude/
