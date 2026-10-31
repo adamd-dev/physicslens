@@ -22,6 +22,8 @@ export function applyEvent(s: RunState, e: StreamEvent): RunState {
   switch (e.event) {
     case "run":
       return { ...s, runId: e.data.id };
+    case "note":
+      return { ...s, warnings: [...s.warnings, e.data.message] };
     case "status":
       return { ...s, stage: e.data.stage };
     case "video":

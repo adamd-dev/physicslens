@@ -20,6 +20,8 @@ echo "building the web app..."
 export PHYSICSLENS_PUBLIC=1 PHYSICSLENS_MAX_UPLOAD_MB=100 PHYSICSLENS_MAX_UPLOADS=40 PHYSICSLENS_PORT=8000
 .venv/bin/physicslens-ui >cache/server.log 2>&1 &
 SERVER=$!
+# The Mac is the server: no display, idle or system sleep while it runs (caffeinate ends with the server).
+command -v caffeinate >/dev/null && caffeinate -dims -w "$SERVER" &
 TUNNEL=""
 trap 'kill $SERVER ${TUNNEL:+$TUNNEL} 2>/dev/null' EXIT INT TERM
 for _ in $(seq 30); do curl -sf http://127.0.0.1:8000/api/config >/dev/null && break; sleep 1; done

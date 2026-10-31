@@ -16,7 +16,12 @@ const SORTS = { new: "Newest", old: "Oldest", dev: "Closest to 9.81", cost: "Cos
 type Sort = keyof typeof SORTS;
 
 /** Every saved analysis. Filters live in the URL, so a filtered view survives a reload. */
-export default function HistoryPage({ query, shared = false, onChange }: { query: URLSearchParams; shared?: boolean; onChange?: () => void }) {
+export default function HistoryPage({ query, shared = false, canDelete = true, onChange }: {
+  query: URLSearchParams;
+  shared?: boolean;
+  canDelete?: boolean; // a public site keeps its shared History: no delete buttons
+  onChange?: () => void;
+}) {
   const [runs, setRuns] = useState<RunSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null); // announced after a delete, or why it failed
@@ -163,7 +168,7 @@ export default function HistoryPage({ query, shared = false, onChange }: { query
       ) : (
         <ul className="space-y-2" aria-label="Runs">
           {shown.map((run) => (
-            <RunRow key={run.id} run={run} onDelete={remove} />
+            <RunRow key={run.id} run={run} onDelete={canDelete ? remove : undefined} />
           ))}
         </ul>
       )}

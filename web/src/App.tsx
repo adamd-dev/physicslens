@@ -14,7 +14,7 @@ export default function App() {
   const route = useRoute();
   const [running, setRunning] = useState(false);
   const [runCount, setRunCount] = useState<number | null>(null);
-  const [site, setSite] = useState<SiteConfig>({ public: false, max_upload_mb: 500 });
+  const [site, setSite] = useState<SiteConfig>({ public: false, max_upload_mb: 500, can_delete: true });
   useEffect(() => {
     getConfig().then(setSite).catch(() => {});
   }, []);
@@ -54,8 +54,8 @@ export default function App() {
         )}
         <Suspense fallback={<div className="panel h-64 animate-pulse" aria-busy="true" />}>
           {route.page === "home" && <HomePage />}
-          {route.page === "history" && <HistoryPage query={route.query} shared={site.public} onChange={refreshCount} />}
-          {route.page === "run" && <RunDetailPage id={route.id} onDeleted={refreshCount} />}
+          {route.page === "history" && <HistoryPage query={route.query} shared={site.public} canDelete={site.can_delete} onChange={refreshCount} />}
+          {route.page === "run" && <RunDetailPage id={route.id} canDelete={site.can_delete} onDeleted={refreshCount} />}
         </Suspense>
       </main>
       <footer className="mt-12 border-t border-slate-800 pt-4 text-center text-sm text-slate-400">

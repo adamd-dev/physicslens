@@ -14,7 +14,7 @@ const Charts = lazy(() => import("../components/Charts"));
 const noop = () => {};
 
 /** A saved run, rebuilt by replaying its events through the same handler the live page uses. */
-export default function RunDetailPage({ id, onDeleted }: { id: string; onDeleted?: () => void }) {
+export default function RunDetailPage({ id, canDelete = true, onDeleted }: { id: string; canDelete?: boolean; onDeleted?: () => void }) {
   const [record, setRecord] = useState<RunRecord | null>(null);
   const [state, setState] = useState<RunState>(EMPTY_RUN);
   const [info, setInfo] = useState<VideoInfo | null | undefined>(undefined); // null: the video is gone
@@ -70,7 +70,7 @@ export default function RunDetailPage({ id, onDeleted }: { id: string; onDeleted
           </p>
         </div>
         <div className="flex items-center gap-2">
-          {confirming ? (
+          {!canDelete ? null : confirming ? (
             <>
               <button
                 className="btn border border-rose-500/50 text-rose-300 hover:bg-rose-500/10"

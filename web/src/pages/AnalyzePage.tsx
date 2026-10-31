@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import type { Point, Settings, SiteConfig, VideoInfo } from "../api";
-import { analyze, uploadVideo } from "../api";
+import { analyze, cancelRun, uploadVideo } from "../api";
 import AgentTimeline from "../components/AgentTimeline";
 import ResultCard from "../components/ResultCard";
 import SettingsPanel, { type Options } from "../components/SettingsPanel";
@@ -172,7 +172,13 @@ export default function AnalyzePage({ active = true, site, onRunning }: { active
                 {running ? `${stageText(stage, sam)}…` : ""}
               </div>
               {running && (
-                <button className="btn-ghost w-full" onClick={() => abort.current?.abort()}>
+                <button
+                  className="btn-ghost w-full"
+                  onClick={() => {
+                    if (runId) cancelRun(runId); // the server stops too, so the next run is not blocked
+                    abort.current?.abort();
+                  }}
+                >
                   Stop
                 </button>
               )}

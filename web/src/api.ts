@@ -105,6 +105,7 @@ export interface AgentMessage {
 export type StreamEvent =
   | { event: "run"; data: { id: string } }
   | { event: "status"; data: { stage: string } }
+  | { event: "note"; data: { message: string } }
   | { event: "video"; data: { frames: number; fps: number; scale: number; warnings: string[] } }
   | { event: "track"; data: TrackEvent }
   | { event: "detection"; data: Detection }
@@ -212,6 +213,11 @@ export async function getRun(id: string, signal?: AbortSignal): Promise<RunRecor
   return response.json();
 }
 
+/** Ask the server to stop a run in progress: no further paid step starts and the slot frees. */
+export async function cancelRun(id: string): Promise<void> {
+  await fetch(`/api/runs/${encodeURIComponent(id)}/cancel`, { method: "POST" }).catch(() => {});
+}
+
 export async function deleteRun(id: string): Promise<void> {
   const response = await fetch(`/api/runs/${encodeURIComponent(id)}`, { method: "DELETE" });
   if (!response.ok) throw await failure(response);
@@ -226,6 +232,7 @@ export async function videoInfo(videoId: string, signal?: AbortSignal): Promise<
 export interface SiteConfig {
   public: boolean; // a shared public site: uploads and runs are visible to everyone
   max_upload_mb: number;
+  can_delete: boolean; // false on a public site: only its owner removes runs
 }
 
 export async function getConfig(): Promise<SiteConfig> {
