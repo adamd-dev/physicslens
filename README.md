@@ -103,7 +103,7 @@ The landing page (`web/landing.html`) is pre-rendered at build time and deployed
 
 ## Credits
 
-- Pendulum clip: “Fadenpendelgeschwindigkeit (2 grad)” by Mathe-AC Lernwerkstatt Aachen, Wikimedia Commons, CC BY 4.0.
+- Pendulum clip: “Fadenpendelgeschwindigkeit (2 grad)” by Mathe-AC Lernwerkstatt Aachen (Rhetos), Wikimedia Commons, CC BY-SA 4.0.
 - BallDrop: Open Source Physics Tracker sample (used for local testing only; not redistributed).
 - A hackathon project, not endorsed by Meta.
 

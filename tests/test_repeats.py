@@ -51,3 +51,12 @@ def test_an_ordinary_clip_keeps_every_frame(tmp_path):
         warnings.simplefilter("always")
         video = load_video(str(tmp_path / "d.avi"))
     assert len(video.frames) == 27 and not any("repeated" in str(w.message) for w in caught)
+
+
+def test_a_still_clip_is_not_mistaken_for_a_slowed_one(tmp_path):
+    path = tmp_path / "still.avi"
+    writer = cv2.VideoWriter(str(path), cv2.VideoWriter_fourcc(*"MJPG"), 30, (640, 480))
+    for _ in range(9):
+        writer.write(np.zeros((480, 640, 3), np.uint8))
+    writer.release()
+    assert len(load_video(str(path)).frames) == 9

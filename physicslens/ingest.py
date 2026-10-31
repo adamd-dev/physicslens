@@ -27,7 +27,8 @@ def _new_frames(frames: list[np.ndarray]) -> list[int] | None:
              for f in frames]
     new = [0] + [i for i in range(1, len(small)) if int((np.abs(small[i] - small[i - 1]) > 25).sum()) >= CHANGED_PX]
     repeats = len(frames) - len(new)
-    return new if len(frames) > 2 and repeats >= REPEAT_SHARE * (len(frames) - 1) else None
+    # A clip that hardly changes at all is still, not slowed: it needs real new frames to be an edit.
+    return new if len(new) >= 3 and repeats >= REPEAT_SHARE * (len(frames) - 1) else None
 
 
 @dataclass

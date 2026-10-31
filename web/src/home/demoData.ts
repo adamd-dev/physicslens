@@ -1,6 +1,6 @@
 /** Real numbers for the Home page. Every value here comes from a run in this repo, never from a mock-up.
  *  - BallDrop (OSP Tracker sample): motion tracker g = 9.728 ± 0.021 (fit), 23 points; SAM 3.1 box 9.653 ± 0.065.
- *  - Wikimedia Commons "Fadenpendelgeschwindigkeit (2 grad)" by Mathe-AC Lernwerkstatt Aachen, CC BY 4.0: a 0.60 m
+ *  - Wikimedia Commons "Fadenpendelgeschwindigkeit (2 grad)" by Mathe-AC Lernwerkstatt Aachen (Rhetos), CC BY-SA 4.0: a 0.60 m
  *    pendulum; the Muse agent's run (runs/commons_pendulum_agent.json) gave L = 0.590 m from ω = 4.078 rad/s. */
 
 export const G = 9.81;

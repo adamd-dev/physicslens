@@ -93,7 +93,7 @@ export default function HomePage({ local = true, appUrl }: { local?: boolean; ap
         </table>
         </div>
         <p className="mt-3 text-xs text-slate-400">
-          Pendulum clip: “Fadenpendelgeschwindigkeit (2 grad)” by Mathe-AC Lernwerkstatt Aachen, Wikimedia Commons, CC BY 4.0. BallDrop: Open Source Physics Tracker sample.
+          Pendulum clip: “Fadenpendelgeschwindigkeit (2 grad)” by Mathe-AC Lernwerkstatt Aachen (Rhetos), Wikimedia Commons, CC BY-SA 4.0. BallDrop: Open Source Physics Tracker sample.
         </p>
       </Section>
 
