@@ -110,11 +110,13 @@ def load_video(
     if (new := _new_frames(frames)) is not None:
         # Copies add no motion and stall the motion tracker: keep each real frame once, at its own time.
         step = float(np.median(np.diff(new))) if len(new) > 1 else 1.0
+        repeats = len(frames) - len(new)
         frames = [frames[i] for i in new]
         container_ts = [container_ts[i] for i in new]
         index_ts = [index_ts[i] for i in new]
         expected_dt *= step
-        warnings.warn(f"each frame was repeated about {step:g} times (a slowed edit): kept the {len(frames)} real frames")
+        warnings.warn(f"{repeats} of {repeats + len(frames)} frames were copies of the one before (a slowed edit): "
+                      f"kept the {len(frames)} real frames")
     timestamps, source = np.asarray(index_ts), "index"
     if len(frames) > 1:
         repaired = _repair(np.asarray(container_ts))

@@ -35,7 +35,7 @@ def test_repeated_frames_are_dropped_and_said(tmp_path):
         video = load_video(path, capture_fps=125)
     assert len(video.frames) == 12
     assert np.allclose(np.diff(video.timestamps), 1 / 25, atol=1e-3)  # the real frame interval
-    assert any("repeated" in str(w.message) for w in caught)
+    assert any("slowed edit" in str(w.message) for w in caught)
 
 
 def test_a_slowed_edit_then_gives_the_right_g(tmp_path):
@@ -50,7 +50,7 @@ def test_an_ordinary_clip_keeps_every_frame(tmp_path):
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
         video = load_video(str(tmp_path / "d.avi"))
-    assert len(video.frames) == 27 and not any("repeated" in str(w.message) for w in caught)
+    assert len(video.frames) == 27 and not any("slowed edit" in str(w.message) for w in caught)
 
 
 def test_a_still_clip_is_not_mistaken_for_a_slowed_one(tmp_path):
