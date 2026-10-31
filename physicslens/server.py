@@ -73,8 +73,12 @@ class Cancelled(Exception):
 
 
 def _visitor(request: Request) -> str:
-    # Behind the Cloudflare tunnel every request comes from cloudflared; Cloudflare names the real client.
-    return request.headers.get("cf-connecting-ip") or (request.client.host if request.client else "unknown")
+    # Behind the Cloudflare tunnel every request comes from cloudflared on this machine and Cloudflare names the
+    # real client; anyone else could write that header, so it is trusted only from loopback.
+    host = request.client.host if request.client else "unknown"
+    if host in ("127.0.0.1", "::1", "testclient"):
+        return request.headers.get("cf-connecting-ip") or host
+    return host
 
 
 def _limit(request: Request, kind: str, per_hour: int) -> None:
@@ -83,11 +87,22 @@ def _limit(request: Request, kind: str, per_hour: int) -> None:
         return
     key, now = (_visitor(request), kind), time.monotonic()
     with _hits_lock:
+        if len(_hits) > 10_000:  # forget visitors idle for an hour, so many addresses cannot grow memory
+            for old in [k for k, ts in _hits.items() if not ts or now - ts[-1] >= RATE_WINDOW_S]:
+                del _hits[old]
         recent = [t for t in _hits.get(key, []) if now - t < RATE_WINDOW_S]
         if len(recent) >= per_hour:
             wait = int((RATE_WINDOW_S - (now - recent[0])) / 60) + 1
             raise HTTPException(429, f"{per_hour} {kind}s per hour from your network on this public demo: try again in {wait} min")
         _hits[key] = [*recent, now]
+
+
+def _refund(request: Request, kind: str) -> None:
+    """Give back the last counted request (it was refused for another reason, e.g. the slot was busy)."""
+    with _hits_lock:
+        recent = _hits.get((_visitor(request), kind))
+        if recent:
+            recent.pop()
 VIDEO_TYPES = {".mp4": "video/mp4", ".m4v": "video/mp4", ".mov": "video/quicktime", ".webm": "video/webm",
                ".avi": "video/x-msvideo", ".mkv": "video/x-matroska"}
 _ID = re.compile(r"[0-9a-f]{32}")
@@ -541,7 +556,8 @@ def get_run(run_id: str) -> dict:
 @app.delete("/api/runs/{run_id}", status_code=204)
 def delete_run(run_id: str, request: Request) -> Response:
     # A public History is shared: only whoever runs the site (with the admin token) removes runs from it.
-    if PUBLIC and not (ADMIN_TOKEN and hmac.compare_digest(request.headers.get("x-admin-token", ""), ADMIN_TOKEN)):
+    given = request.headers.get("x-admin-token", "").encode()
+    if PUBLIC and not (ADMIN_TOKEN and hmac.compare_digest(given, ADMIN_TOKEN.encode())):
         raise HTTPException(403, "runs on this public demo can only be deleted by its owner")
     path = _run_path(run_id)
     (RUNS / f"{run_id}.sum.json").unlink(missing_ok=True)
@@ -552,9 +568,10 @@ def delete_run(run_id: str, request: Request) -> Response:
 @app.post("/api/runs/{run_id}/cancel", status_code=202)
 def cancel_run(run_id: str) -> Response:
     """Stop a run in progress (the Stop button); the slot frees as soon as the current step ends."""
-    if not _ID.fullmatch(run_id) or run_id not in _cancels:
+    event = _cancels.get(run_id) if _ID.fullmatch(run_id) else None
+    if event is None:
         raise HTTPException(404, "no such run in progress")
-    _cancels[run_id].set()
+    event.set()
     return Response(status_code=202)
 
 
@@ -563,6 +580,7 @@ def analyze(req: AnalyzeRequest, request: Request) -> StreamingResponse:
     _video_path(req.video_id)  # 404 before the stream starts
     _limit(request, "analysis", RATE_ANALYZE)
     if not _busy.acquire(blocking=False):
+        _refund(request, "analysis")  # a busy slot is not the visitor's fault
         raise HTTPException(409, "an analysis is already running")
     events: queue.Queue[str | None] = queue.Queue()
     run_id = uuid.uuid4().hex
@@ -570,7 +588,8 @@ def analyze(req: AnalyzeRequest, request: Request) -> StreamingResponse:
     cancel = _cancels[run_id] = threading.Event()
 
     def emit(name: str, data) -> None:
-        if cancel.is_set():
+        # Once stopped, only what was already paid for (cost) and why it ended (error) still go out.
+        if cancel.is_set() and name not in ("cost", "error"):
             raise Cancelled
         clean = _clean(data)
         recorded.append({"event": name, "data": clean})

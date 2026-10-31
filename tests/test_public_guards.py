@@ -103,3 +103,27 @@ def test_a_used_up_budget_falls_back_to_the_plain_fit(client, tmp_path, monkeypa
     stream = dict(analyze(client, upload_drop(client, tmp_path), agent=True))
     assert stream["result"]["source"] == "deterministic" and "error" not in stream
     assert "budget" in stream["note"]["message"]
+
+
+def test_a_cancelled_run_still_records_what_it_cost(client, tmp_path, monkeypatch):  # noqa: F811
+    def paid_then_stopped(req, emit):
+        try:
+            for _ in range(200):
+                emit("status", {"stage": "agent"})
+                time.sleep(0.05)
+        finally:
+            emit("cost", {"run_usd": 0.01, "total_usd": 1.0})
+
+    monkeypatch.setattr(server, "_analyze", paid_then_stopped)
+    video = upload_drop(client, tmp_path)
+    threading.Timer(0.3, lambda: [e.set() for e in list(server._cancels.values())]).start()
+    names = [name for name, _ in analyze(client, video)]
+    assert "cost" in names and names[-2:] == ["error", "done"]
+
+
+def test_the_cloudflare_header_counts_only_from_this_machine():
+    from types import SimpleNamespace
+
+    far = SimpleNamespace(client=SimpleNamespace(host="192.168.1.20"), headers={"cf-connecting-ip": "1.2.3.4"})
+    near = SimpleNamespace(client=SimpleNamespace(host="127.0.0.1"), headers={"cf-connecting-ip": "1.2.3.4"})
+    assert server._visitor(far) == "192.168.1.20" and server._visitor(near) == "1.2.3.4"
