@@ -87,7 +87,7 @@ The landing page (`web/landing.html`) is pre-rendered at build time and deployed
 ## Development
 
 ```bash
-.venv/bin/pytest -q                       # Python tests (synthetic clips, no API calls)
+.venv/bin/pytest -q -n auto               # Python tests in parallel (synthetic clips, no API calls)
 .venv/bin/ruff check . && .venv/bin/mypy physicslens cli.py
 (cd web && npm test && npm run build)     # Home page maths, type check, build
 ```

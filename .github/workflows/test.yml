@@ -18,7 +18,7 @@ jobs:
       - run: ruff check .
       - run: mypy physicslens cli.py
       # Tests are synthetic and offline: no API keys or sample videos needed.
-      - run: pytest -q
+      - run: pytest -q -n auto
 
   web:
     runs-on: ubuntu-latest
