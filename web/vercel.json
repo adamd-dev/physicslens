@@ -22,7 +22,7 @@
   "redirects": [
     {
       "source": "/app",
-      "destination": "https://get-syndication-talent-ser.trycloudflare.com/",
+      "destination": "https://oak-faq-trusts-imposed.trycloudflare.com/",
       "permanent": false
     }
   ]
