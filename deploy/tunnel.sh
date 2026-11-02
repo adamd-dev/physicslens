@@ -20,7 +20,8 @@ echo "building the web app..."
 export PHYSICSLENS_PUBLIC=1 PHYSICSLENS_MAX_UPLOAD_MB=100 PHYSICSLENS_MAX_UPLOADS=40 PHYSICSLENS_PORT=8000
 SERVER=""
 TUNNEL=""
-trap 'kill ${SERVER:+$SERVER} ${TUNNEL:+$TUNNEL} 2>/dev/null' EXIT INT TERM
+trap 'kill ${SERVER:+$SERVER} ${TUNNEL:+$TUNNEL} 2>/dev/null' EXIT
+trap 'exit 130' INT TERM  # exit runs the EXIT trap; without it a TERM only killed the children and the watchdog revived them
 
 start_server() {
   .venv/bin/physicslens-ui >>cache/server.log 2>&1 &
@@ -61,7 +62,8 @@ open_tunnel() {
   TUNNEL=$!
   URL=""
   for _ in $(seq 60); do
-    URL="$(grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' cache/tunnel.log | head -1 || true)"
+    # api.trycloudflare.com is cloudflared's own endpoint, quoted in its error lines: never the tunnel's link
+    URL="$(grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' cache/tunnel.log | grep -v '^https://api\.' | head -1 || true)"
     [ -n "$URL" ] && return 0
     kill -0 "$TUNNEL" 2>/dev/null || return 1
     sleep 1
