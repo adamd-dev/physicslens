@@ -16,7 +16,7 @@ export default function Landing() {
           </a>
           <nav aria-label="Sections">
             <ul className="flex flex-wrap items-center gap-1 text-sm">
-              {[["#how-it-works", "How it works"], ["#results", "Results"], ["#faq", "FAQ"], ["https://github.com/adamd-dev/physicslens", "Code"], ...(APP_URL ? [[`${APP_URL}#/analyze`, "Open the app"]] : [])].map(([to, label]) => (
+              {[["#how-it-works", "How it works"], ["#results", "Results"], ["#faq", "FAQ"], ["https://youtu.be/7RV-N_8wWk4", "Demo video"], ["https://github.com/adamd-dev/physicslens", "Code"], ...(APP_URL ? [[`${APP_URL}#/analyze`, "Open the app"]] : [])].map(([to, label]) => (
                 <li key={to}>
                   <a href={to} className="inline-flex min-h-10 items-center rounded-lg px-3 text-slate-400 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400">{label}</a>
                 </li>

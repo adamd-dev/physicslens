@@ -4,8 +4,9 @@
 physics with SciPy, and a Meta Muse Spark agent checks the fit before you see a number.
 
 - **Landing page:** https://physicslens-lab.vercel.app
+- **Demo video (2:37):** https://youtu.be/7RV-N_8wWk4
 - **Live app:** https://physicslens-lab.vercel.app/app (runs from the author's machine during the judging period; see
-  [Run it as a public site](#run-it-as-a-public-site)). If it does not answer, the machine is offline: the demo video
+  [Run it as a public site](#run-it-as-a-public-site)). If it does not answer, the machine is offline: the [demo video](https://youtu.be/7RV-N_8wWk4)
   shows the full flow, and [Run it on your computer](#run-it-on-your-computer) takes five commands.
 
 Built for the Meta Global AI Developer Hackathon (Oct 26 – Nov 4, 2026). All code here was written during the hackathon.
