@@ -22,7 +22,7 @@
   "redirects": [
     {
       "source": "/app",
-      "destination": "https://api.trycloudflare.com/",
+      "destination": "https://boring-pharmacy-seems-plaza.trycloudflare.com/",
       "permanent": false
     }
   ]
