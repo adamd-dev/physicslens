@@ -18,6 +18,14 @@ export interface Scale {
   length_m: number;
 }
 
+/** A saved request's scale: runs made from the CLI or the API may give px_per_m instead of two points. */
+export interface SavedScale {
+  p1: Point | null;
+  p2: Point | null;
+  length_m: number | null;
+  px_per_m?: number | null;
+}
+
 export interface Settings {
   tracker: "motion" | "color" | "sam";
   hsv_lower: [number, number, number];
@@ -196,7 +204,7 @@ export interface RunRecord {
   created_at: string;
   video_id: string;
   video_name: string | null;
-  request: AnalyzeRequest;
+  request: Omit<AnalyzeRequest, "scale"> & { scale: SavedScale };
   events: StreamEvent[];
   summary: RunSummary;
 }

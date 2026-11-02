@@ -137,10 +137,86 @@ def _video_path(video_id: str) -> Path:
     # The id is generated here on upload; anything else is refused before touching the filesystem.
     if not _ID.fullmatch(video_id):
         raise HTTPException(404, "unknown video")
-    matches = [p for p in UPLOADS.glob(f"{video_id}.*") if p.suffix in VIDEO_TYPES]
+    # stem == id: the browser copy (<id>.play.mp4) is never the file that is analysed
+    matches = [p for p in UPLOADS.glob(f"{video_id}.*") if p.suffix in VIDEO_TYPES and p.stem == video_id]
     if not matches:
         raise HTTPException(404, "unknown video")
     return matches[0]
+
+
+# Codecs a browser <video> plays everywhere. Anything else (MPEG-4 Part 2, MJPEG, HEVC...) is decoded fine by
+# OpenCV for the analysis, but the stage would stay black: the browser gets an H.264 (or VP8) copy instead.
+PLAYABLE_CODECS = {"avc1", "avc3", "h264", "x264", "vp80", "vp08", "vp90", "vp09", "av01"}
+PLAY_MAX_WIDTH = 1280  # the copy is only watched, never measured: smaller is faster to write
+_play_locks: dict[str, threading.Lock] = {}
+_play_locks_lock = threading.Lock()
+
+
+def _codec(path: Path) -> str:
+    cap = cv2.VideoCapture(str(path))
+    try:
+        code = int(cap.get(cv2.CAP_PROP_FOURCC))
+    finally:
+        cap.release()
+    return code.to_bytes(4, "little").decode("latin-1").strip("\x00 ").lower()
+
+
+def _play_copy(video_id: str) -> Path | None:
+    for ext in (".mp4", ".webm"):
+        path = UPLOADS / f"{video_id}.play{ext}"
+        if path.exists():
+            return path
+    return None
+
+
+def _write_play_copy(src: Path, video_id: str) -> Path | None:
+    """Re-encode `src` at its own frame rate, so the stage's clock still matches the track times."""
+    cap = cv2.VideoCapture(str(src))
+    try:
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        fps = fps if math.isfinite(fps) and fps > 0 else 30.0
+        width, height = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        k = min(1.0, PLAY_MAX_WIDTH / width)
+        size = (max(2, round(width * k / 2) * 2), max(2, round(height * k / 2) * 2))  # H.264 wants even sizes
+        for fourcc, ext in (("avc1", ".mp4"), ("VP80", ".webm")):
+            tmp = UPLOADS / f"{video_id}.play-tmp{ext}"  # OpenCV picks the container from the extension
+            writer = cv2.VideoWriter(str(tmp), cv2.VideoWriter.fourcc(*fourcc), fps, size)
+            if writer.isOpened():
+                break
+            writer.release()
+        else:
+            logger.warning("video %s: no H.264 or VP8 encoder for a browser copy", video_id)
+            return None
+        try:
+            while True:
+                ok, frame = cap.read()
+                if not ok:
+                    break
+                writer.write(frame if size == (width, height) else cv2.resize(frame, size, interpolation=cv2.INTER_AREA))
+        finally:
+            writer.release()
+    finally:
+        cap.release()
+    dest = UPLOADS / f"{video_id}.play{ext}"
+    os.replace(tmp, dest)
+    return dest
+
+
+def _browser_file(video_id: str, path: Path) -> Path:
+    """The file to stream to the browser: the upload itself, or a playable copy made once on first request."""
+    if _codec(path) in PLAYABLE_CODECS:
+        return path
+    with _play_locks_lock:
+        lock = _play_locks.setdefault(video_id, threading.Lock())
+    with lock:  # parallel range requests wait for one copy instead of each writing their own
+        copy = _play_copy(video_id)
+        if copy is None:
+            try:
+                copy = _write_play_copy(path, video_id)
+            except (OSError, cv2.error):
+                logger.exception("video %s: browser copy failed", video_id)
+                copy = None
+    return copy or path
 
 
 def _probe(path: Path) -> dict | None:
@@ -198,6 +274,8 @@ def _prune_uploads() -> None:
     for old in videos[: max(0, len(videos) - MAX_UPLOADS)]:
         old.unlink(missing_ok=True)
         (UPLOADS / f"{old.stem}.json").unlink(missing_ok=True)
+        for copy in UPLOADS.glob(f"{old.stem}.play*"):
+            copy.unlink(missing_ok=True)
 
 
 @app.get("/api/config")
@@ -216,7 +294,7 @@ def video_info(video_id: str) -> dict:
 
 @app.get("/api/videos/{video_id}/file")
 def video_file(video_id: str) -> FileResponse:
-    path = _video_path(video_id)
+    path = _browser_file(video_id, _video_path(video_id))
     return FileResponse(path, media_type=VIDEO_TYPES[path.suffix])
 
 

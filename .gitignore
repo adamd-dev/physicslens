@@ -21,3 +21,6 @@ web/dist-landing/
 web/dist-landing-ssr/
 .claude/
 samples/open/
+
+# demo video project (renders, footage, cache)
+video/

@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useState } from "react";
-import type { RunRecord, VideoInfo } from "../api";
+import type { Point, RunRecord, VideoInfo } from "../api";
 import { deleteRun, getRun, videoInfo } from "../api";
 import AgentTimeline from "../components/AgentTimeline";
 import ResultCard from "../components/ResultCard";
@@ -54,7 +54,8 @@ export default function RunDetailPage({ id, canDelete = true, onDeleted }: { id:
 
   const { summary, request } = record;
   const { track, result, messages, cost, warnings } = state;
-  const points = [request.scale.p1, request.scale.p2];
+  const { p1, p2, length_m: lengthM, px_per_m: pxPerM } = request.scale;
+  const points: Point[] = p1 && p2 ? [p1, p2] : []; // a px/m scale has no points to draw
   return (
     <div>
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
@@ -102,7 +103,7 @@ export default function RunDetailPage({ id, canDelete = true, onDeleted }: { id:
               <div className="graph-paper grid aspect-video place-items-center rounded-lg text-sm text-slate-400">The video of this run is no longer on this machine.</div>
             ) : (
               <VideoStage
-                info={info} mode="view" points={points} lengthM={request.scale.length_m} roi={request.settings.roi} ballBox={request.settings.sam_box}
+                info={info} mode="view" points={points} lengthM={lengthM ?? 1} roi={request.settings.roi} ballBox={request.settings.sam_box}
                 startS={request.start} track={track} result={result} onPoints={noop} onRoi={noop} onBallBox={noop}
               />
             )}
@@ -116,7 +117,7 @@ export default function RunDetailPage({ id, canDelete = true, onDeleted }: { id:
             <summary className="cursor-pointer font-medium text-slate-200">Request</summary>
             <dl className="readout mt-3 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-slate-300">
               <dt className="text-slate-400">tracker</dt><dd>{TRACKER_LABEL[request.settings.tracker] ?? request.settings.tracker}</dd>
-              <dt className="text-slate-400">scale</dt><dd>{request.scale.length_m} m between ({points.map((p) => p.map(Math.round).join(", ")).join(") and (")})</dd>
+              <dt className="text-slate-400">scale</dt><dd>{points.length ? `${lengthM} m between (${points.map((p) => p.map(Math.round).join(", ")).join(") and (")})` : `${pxPerM} px/m`}</dd>
               <dt className="text-slate-400">window</dt><dd>{request.start} s to {request.end ?? "end"}{request.capture_fps ? ` · captured at ${request.capture_fps} fps` : ""}</dd>
               <dt className="text-slate-400">model</dt><dd>{request.model === "auto" ? "auto" : MODEL_LABEL[request.model] ?? request.model} · axis {request.axis}</dd>
               {request.settings.roi && (<><dt className="text-slate-400">search area</dt><dd>{request.settings.roi.join(", ")}</dd></>)}
