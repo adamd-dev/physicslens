@@ -22,7 +22,7 @@
   "redirects": [
     {
       "source": "/app",
-      "destination": "https://cities-transmitted-shopper-brass.trycloudflare.com/",
+      "destination": "https://api.trycloudflare.com/",
       "permanent": false
     }
   ]
